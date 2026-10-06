@@ -1,0 +1,80 @@
+// SchoolSafe Prisma Schema
+// Database Engine: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 8 Platform Roles
+enum UserRole {
+  PARENT
+  STUDENT
+  SCHOOL_ADMIN
+  TRANSPORT_PROVIDER
+  DRIVER
+  BUSINESS
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Account Lifecycle Statuses
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+// Core User Account Model
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  phone               String?              @unique
+  firstName           String
+  lastName            String
+  passwordHash        String
+  role                UserRole             @default(PARENT)
+  status              UserStatus           @default(ACTIVE)
+  isVerified          Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@map("users")
+}
+
+// Refresh Token Model with Rotation & Revocation
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Secure Password Reset Token Model
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
