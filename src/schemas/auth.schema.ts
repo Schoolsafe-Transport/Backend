@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z, type infer as zInfer } from 'zod';
 
 const passwordValidation = z
   .string()
@@ -51,9 +51,9 @@ export const changePasswordSchema = z.object({
   newPassword: passwordValidation,
 });
 
-export type RegisterInput = z.infer<typeof registerSchema>;
-export type LoginInput = z.infer<typeof loginSchema>;
-export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
-export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
-export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type RegisterInput = zInfer<typeof registerSchema>;
+export type LoginInput = zInfer<typeof loginSchema>;
+export type RefreshTokenInput = zInfer<typeof refreshTokenSchema>;
+export type ForgotPasswordInput = zInfer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = zInfer<typeof resetPasswordSchema>;
+export type ChangePasswordInput = zInfer<typeof changePasswordSchema>;

@@ -1,6 +1,6 @@
 import request from 'supertest';
 import app from '../src/app';
-import { prisma } from '../config/prisma';
+import { prisma } from '../src/config/prisma';
 
 describe('Authentication & RBAC Test Suite', () => {
   const testParent = {

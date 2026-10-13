@@ -46,3 +46,17 @@ export interface AuthResponse {
 export interface AuthenticatedRequest extends Request {
   user?: UserSanitized;
 }
+
+export interface RegisterInput {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+  role?: UserRole;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { env } from '../config/env';
 import { JWTPayload, UserSanitized } from '../types/auth.types';
 import { User } from '@prisma/client';
@@ -38,6 +39,7 @@ export const generateAccessToken = (payload: JWTPayload): string => {
 export const generateRefreshToken = (payload: JWTPayload): string => {
   return jwt.sign(payload, env.JWT_REFRESH_SECRET, {
     expiresIn: env.JWT_REFRESH_EXPIRES_IN,
+    jwtid: crypto.randomUUID(),
   });
 };
 

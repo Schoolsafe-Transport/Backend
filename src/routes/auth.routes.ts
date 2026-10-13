@@ -54,7 +54,7 @@ const router = Router();
  *       409:
  *         description: Email or phone already registered
  */
-router.post('/register', validate(registerSchema), (req, res, next) =>
+router.post('/register', validate(registerSchema), (req: any, res: any, next: any) =>
   authController.register(req, res, next)
 );
 
@@ -87,7 +87,7 @@ router.post('/register', validate(registerSchema), (req, res, next) =>
  *       403:
  *         description: Account suspended or rejected
  */
-router.post('/login', validate(loginSchema), (req, res, next) =>
+router.post('/login', validate(loginSchema), (req: any, res: any, next: any) =>
   authController.login(req, res, next)
 );
 
@@ -115,7 +115,7 @@ router.post('/login', validate(loginSchema), (req, res, next) =>
  *       401:
  *         description: Invalid or revoked refresh token
  */
-router.post('/refresh-token', validate(refreshTokenSchema), (req, res, next) =>
+router.post('/refresh-token', validate(refreshTokenSchema), (req: any, res: any, next: any) =>
   authController.refreshToken(req, res, next)
 );
 
@@ -140,7 +140,7 @@ router.post('/refresh-token', validate(refreshTokenSchema), (req, res, next) =>
  *       200:
  *         description: Logged out successfully
  */
-router.post('/logout', authenticate as any, (req, res, next) =>
+router.post('/logout', authenticate as any, (req: any, res: any, next: any) =>
   authController.logout(req, res, next)
 );
 
@@ -166,7 +166,7 @@ router.post('/logout', authenticate as any, (req, res, next) =>
  *       200:
  *         description: Reset instructions dispatched
  */
-router.post('/forgot-password', validate(forgotPasswordSchema), (req, res, next) =>
+router.post('/forgot-password', validate(forgotPasswordSchema), (req: any, res: any, next: any) =>
   authController.forgotPassword(req, res, next)
 );
 
@@ -197,7 +197,7 @@ router.post('/forgot-password', validate(forgotPasswordSchema), (req, res, next)
  *       400:
  *         description: Invalid or expired token
  */
-router.post('/reset-password', validate(resetPasswordSchema), (req, res, next) =>
+router.post('/reset-password', validate(resetPasswordSchema), (req: any, res: any, next: any) =>
   authController.resetPassword(req, res, next)
 );
 
@@ -216,7 +216,7 @@ router.post('/reset-password', validate(resetPasswordSchema), (req, res, next) =
  *       401:
  *         description: Unauthorized
  */
-router.get('/me', authenticate as any, (req, res, next) =>
+router.get('/me', authenticate as any, (req: any, res: any, next: any) =>
   authController.getMe(req as any, res, next)
 );
 
@@ -239,7 +239,7 @@ router.get(
   '/admin-only',
   authenticate as any,
   authorize('ADMIN', 'SUPER_ADMIN') as any,
-  (req, res) => authController.adminOnly(req as any, res)
+  (req: any, res: any) => authController.adminOnly(req as any, res)
 );
 
 /**
@@ -261,7 +261,7 @@ router.get(
   '/school-only',
   authenticate as any,
   authorize('SCHOOL_ADMIN', 'ADMIN', 'SUPER_ADMIN') as any,
-  (req, res) => authController.schoolAdminOnly(req as any, res)
+  (req: any, res: any) => authController.schoolAdminOnly(req as any, res)
 );
 
 /**
@@ -283,7 +283,7 @@ router.get(
   '/provider-only',
   authenticate as any,
   authorize('TRANSPORT_PROVIDER', 'ADMIN', 'SUPER_ADMIN') as any,
-  (req, res) => authController.providerOnly(req as any, res)
+  (req: any, res: any) => authController.providerOnly(req as any, res)
 );
 
 export default router;

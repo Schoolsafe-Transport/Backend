@@ -30,6 +30,42 @@ enum UserStatus {
   REJECTED
 }
 
+// Transportation Request Lifecycle
+enum RequestStatus {
+  PENDING
+  NEGOTIATING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+// Negotiation Offer Lifecycle
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  COUNTERED
+  EXPIRED
+}
+
+// Binding Agreement Statuses
+enum AgreementStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+// Payment Transaction Statuses
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
 // Core User Account Model
 model User {
   id                  String               @id @default(uuid())
@@ -41,11 +77,27 @@ model User {
   role                UserRole             @default(PARENT)
   status              UserStatus           @default(ACTIVE)
   isVerified          Boolean              @default(false)
+  profilePhoto        String?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+
+  // Marketplace relations
+  students            Student[]            @relation("ParentStudents")
+  vehicles            Vehicle[]            @relation("ProviderVehicles")
+  routes              Route[]              @relation("ProviderRoutes")
+  parentRequests      TransportationRequest[] @relation("ParentRequests")
+  providerRequests    TransportationRequest[] @relation("ProviderRequests")
+  sentOffers          TransportationOffer[]   @relation("SentOffers")
+  parentAgreements    TransportationAgreement[] @relation("ParentAgreements")
+  providerAgreements  TransportationAgreement[] @relation("ProviderAgreements")
+  payerPayments       Payment[]            @relation("PayerPayments")
+  receiverPayments    Payment[]            @relation("ReceiverPayments")
+  notifications       Notification[]       @relation("UserNotifications")
+  ratingsGiven        Rating[]             @relation("ParentRatings")
+  ratingsReceived     Rating[]             @relation("ProviderRatings")
 
   @@map("users")
 }
@@ -77,4 +129,245 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Student Model (Child of Parent)
+model Student {
+  id             String                   @id @default(uuid())
+  parentId       String
+  parent         User                     @relation("ParentStudents", fields: [parentId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String
+  gender         String?
+  dateOfBirth    DateTime?
+  grade          String?
+  schoolName     String
+  schoolBranch   String?
+  homeAddress    String?
+  emergencyPhone String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  requests       TransportationRequest[]
+  agreements     TransportationAgreement[]
+
+  @@index([parentId])
+  @@map("students")
+}
+
+// Vehicle Asset Model
+model Vehicle {
+  id               String                   @id @default(uuid())
+  providerId       String
+  provider         User                     @relation("ProviderVehicles", fields: [providerId], references: [id], onDelete: Cascade)
+  make             String
+  model            String
+  year             Int?
+  plateNumber      String                   @unique
+  capacity         Int
+  photoUrl         String?
+  inspectionExpiry DateTime?
+  isVerified       Boolean                  @default(true)
+  status           String                   @default("ACTIVE") // ACTIVE, MAINTENANCE
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  routes           Route[]
+  agreements       TransportationAgreement[]
+
+  @@index([providerId])
+  @@map("vehicles")
+}
+
+// Route Offering Model
+model Route {
+  id                     String                   @id @default(uuid())
+  providerId             String
+  provider               User                     @relation("ProviderRoutes", fields: [providerId], references: [id], onDelete: Cascade)
+  vehicleId              String
+  vehicle                Vehicle                  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  name                   String
+  origin                 String
+  destinationSchool      String
+  schoolBranch           String?
+  departureTimeMorning   String?
+  departureTimeAfternoon String?
+  serviceType            String                   @default("BOTH") // MORNING, AFTERNOON, BOTH
+  capacity               Int
+  availableSeats         Int
+  monthlyPrice           Float
+  isAcceptingPassengers  Boolean                  @default(true)
+  status                 String                   @default("ACTIVE") // ACTIVE, INACTIVE
+  completedTrips         Int                      @default(0)
+  averageRating          Float                    @default(5.0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  stops                  RouteStop[]
+  requests               TransportationRequest[]
+  agreements             TransportationAgreement[]
+
+  @@index([providerId])
+  @@index([vehicleId])
+  @@map("routes")
+}
+
+// Route Pickup / Drop-off Stop
+model RouteStop {
+  id                   String                   @id @default(uuid())
+  routeId              String
+  route                Route                    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  name                 String
+  pickupTimeMorning    String?
+  dropoffTimeAfternoon String?
+  orderIndex           Int                      @default(0)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  requests             TransportationRequest[]
+  agreements           TransportationAgreement[]
+
+  @@index([routeId])
+  @@map("route_stops")
+}
+
+// Transportation Seat Request
+model TransportationRequest {
+  id                 String                   @id @default(uuid())
+  parentId           String
+  parent             User                     @relation("ParentRequests", fields: [parentId], references: [id], onDelete: Cascade)
+  studentId          String
+  student            Student                  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  providerId         String
+  provider           User                     @relation("ProviderRequests", fields: [providerId], references: [id], onDelete: Cascade)
+  routeId            String
+  route              Route                    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  pickupStopId       String?
+  pickupStop         RouteStop?               @relation(fields: [pickupStopId], references: [id])
+  pickupStopName     String
+  preferredStartDate DateTime
+  proposedPrice      Float
+  currentPrice       Float
+  message            String?
+  status             RequestStatus            @default(PENDING)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  offers             TransportationOffer[]
+  agreement          TransportationAgreement?
+
+  @@index([parentId])
+  @@index([providerId])
+  @@index([routeId])
+  @@index([studentId])
+  @@map("transportation_requests")
+}
+
+// Immutable Negotiation Offer History
+model TransportationOffer {
+  id        String                @id @default(uuid())
+  requestId String
+  request   TransportationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User                  @relation("SentOffers", fields: [senderId], references: [id], onDelete: Cascade)
+  amount    Float
+  message   String?
+  status    OfferStatus           @default(PENDING)
+  createdAt DateTime              @default(now())
+
+  @@index([requestId])
+  @@index([senderId])
+  @@map("transportation_offers")
+}
+
+// Binding Transportation Agreement
+model TransportationAgreement {
+  id             String                @id @default(uuid())
+  requestId      String                @unique
+  request        TransportationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  parentId       String
+  parent         User                  @relation("ParentAgreements", fields: [parentId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  providerId     String
+  provider       User                  @relation("ProviderAgreements", fields: [providerId], references: [id], onDelete: Cascade)
+  vehicleId      String
+  vehicle        Vehicle               @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  routeId        String
+  route          Route                 @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  pickupStopId   String?
+  pickupStop     RouteStop?            @relation(fields: [pickupStopId], references: [id])
+  pickupStopName String
+  monthlyPrice   Float
+  currency       String                @default("ETB")
+  startDate      DateTime
+  endDate        DateTime?
+  status         AgreementStatus       @default(ACTIVE)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  payments       Payment[]
+
+  @@index([parentId])
+  @@index([providerId])
+  @@index([studentId])
+  @@index([routeId])
+  @@index([vehicleId])
+  @@map("transportation_agreements")
+}
+
+// Payment Ledger Record
+model Payment {
+  id            String                  @id @default(uuid())
+  agreementId   String
+  agreement     TransportationAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  payerId       String
+  payer         User                    @relation("PayerPayments", fields: [payerId], references: [id], onDelete: Cascade)
+  receiverId    String
+  receiver      User                    @relation("ReceiverPayments", fields: [receiverId], references: [id], onDelete: Cascade)
+  amount        Float
+  currency      String                  @default("ETB")
+  status        PaymentStatus           @default(PENDING)
+  paymentMethod String                  @default("SIMULATED_TRANSFER")
+  reference     String                  @unique
+  paidAt        DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  @@index([agreementId])
+  @@index([payerId])
+  @@index([receiverId])
+  @@map("payments")
+}
+
+// Platform In-App Notification
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String
+  entityId  String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+// Provider Rating and Review
+model Rating {
+  id         String   @id @default(uuid())
+  providerId String
+  provider   User     @relation("ProviderRatings", fields: [providerId], references: [id], onDelete: Cascade)
+  parentId   String
+  parent     User     @relation("ParentRatings", fields: [parentId], references: [id], onDelete: Cascade)
+  rating     Int      @default(5)
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@index([providerId])
+  @@index([parentId])
+  @@map("ratings")
 }

@@ -1,9 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import { env } from './env';
 
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
+const globalForPrisma = global as unknown as { prisma: any };
 
-export const prisma =
+export const prisma: any =
   globalForPrisma.prisma ||
   new PrismaClient({
     log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
