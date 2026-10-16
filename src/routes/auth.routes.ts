@@ -2,12 +2,15 @@ import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
 import { authenticate, authorize } from '../middleware/auth.middleware';
+import { authRateLimiter, sensitiveRateLimiter } from '../middleware/rateLimiter';
 import {
   registerSchema,
   loginSchema,
   refreshTokenSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  changePasswordSchema,
+  updateProfileSchema,
 } from '../schemas/auth.schema';
 
 const router = Router();
@@ -54,7 +57,7 @@ const router = Router();
  *       409:
  *         description: Email or phone already registered
  */
-router.post('/register', validate(registerSchema), (req: any, res: any, next: any) =>
+router.post('/register', authRateLimiter, validate(registerSchema), (req: any, res: any, next: any) =>
   authController.register(req, res, next)
 );
 
@@ -87,7 +90,7 @@ router.post('/register', validate(registerSchema), (req: any, res: any, next: an
  *       403:
  *         description: Account suspended or rejected
  */
-router.post('/login', validate(loginSchema), (req: any, res: any, next: any) =>
+router.post('/login', authRateLimiter, validate(loginSchema), (req: any, res: any, next: any) =>
   authController.login(req, res, next)
 );
 
@@ -166,7 +169,7 @@ router.post('/logout', authenticate as any, (req: any, res: any, next: any) =>
  *       200:
  *         description: Reset instructions dispatched
  */
-router.post('/forgot-password', validate(forgotPasswordSchema), (req: any, res: any, next: any) =>
+router.post('/forgot-password', sensitiveRateLimiter, validate(forgotPasswordSchema), (req: any, res: any, next: any) =>
   authController.forgotPassword(req, res, next)
 );
 
@@ -197,7 +200,7 @@ router.post('/forgot-password', validate(forgotPasswordSchema), (req: any, res: 
  *       400:
  *         description: Invalid or expired token
  */
-router.post('/reset-password', validate(resetPasswordSchema), (req: any, res: any, next: any) =>
+router.post('/reset-password', sensitiveRateLimiter, validate(resetPasswordSchema), (req: any, res: any, next: any) =>
   authController.resetPassword(req, res, next)
 );
 
@@ -218,6 +221,84 @@ router.post('/reset-password', validate(resetPasswordSchema), (req: any, res: an
  */
 router.get('/me', authenticate as any, (req: any, res: any, next: any) =>
   authController.getMe(req as any, res, next)
+);
+
+/**
+ * @openapi
+ * /auth/change-password:
+ *   post:
+ *     summary: Change password for currently authenticated user
+ *     tags:
+ *       - Authentication
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *       400:
+ *         description: Incorrect current password or invalid new password
+ *       401:
+ *         description: Unauthorized
+ */
+router.post(
+  '/change-password',
+  authenticate as any,
+  sensitiveRateLimiter,
+  validate(changePasswordSchema),
+  (req: any, res: any, next: any) => authController.changePassword(req as any, res, next)
+);
+
+/**
+ * @openapi
+ * /auth/profile:
+ *   patch:
+ *     summary: Update profile for currently authenticated user
+ *     tags:
+ *       - Authentication
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               profilePhoto:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *       401:
+ *         description: Unauthorized
+ *       409:
+ *         description: Phone number in use
+ */
+(router as any).patch(
+  '/profile',
+  authenticate as any,
+  validate(updateProfileSchema),
+  (req: any, res: any, next: any) => authController.updateProfile(req as any, res, next)
 );
 
 /**

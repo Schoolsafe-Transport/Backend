@@ -70,6 +70,7 @@ export const sanitizeUser = (user: User): UserSanitized => {
     role: user.role as any,
     status: user.status as any,
     isVerified: user.isVerified,
+    profilePhoto: (user as any).profilePhoto || null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

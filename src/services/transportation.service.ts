@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
-import { emitToUser } from '../socket';
+import { AppError } from '../middleware/errorHandler';
+import { emitToUser, emitToTrip } from '../socket';
 import {
   TransportationSearchQuery,
   CreateTransportationRequestInput,
@@ -9,6 +10,14 @@ import {
   CancelAgreementInput,
   ProcessPaymentInput,
   CreateStudentInput,
+  CreateVehicleInput,
+  UpdateVehicleInput,
+  CreateRouteInput,
+  UpdateRouteInput,
+  CreateTripInput,
+  RecordBoardingInput,
+  CreateAuthorizedPickupInput,
+  CreateSafetyIncidentInput,
 } from '../schemas/transportation.schema';
 
 export class TransportationService {
@@ -1188,6 +1197,664 @@ export class TransportationService {
       },
     });
   }
+
+  // ==========================================
+  // Fleet / Vehicle Management for Providers
+  // ==========================================
+
+  async getVehicles(providerId: string) {
+    return prisma.vehicle.findMany({
+      where: { providerId },
+      include: {
+        routes: {
+          select: { id: true, name: true, status: true, availableSeats: true, capacity: true },
+        },
+        documents: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createVehicle(providerId: string, input: CreateVehicleInput) {
+    // Check if plateNumber already registered
+    const existing = await prisma.vehicle.findUnique({
+      where: { plateNumber: input.plateNumber.toUpperCase().trim() },
+    });
+
+    if (existing) {
+      throw new Error(`Vehicle with plate number ${input.plateNumber} is already registered`);
+    }
+
+    return prisma.vehicle.create({
+      data: {
+        providerId,
+        make: input.make,
+        model: input.model,
+        year: input.year,
+        plateNumber: input.plateNumber.toUpperCase().trim(),
+        capacity: input.capacity,
+        photoUrl: input.photoUrl || null,
+        isVerified: false, // Explicit false: requires safety check or admin validation
+        status: 'ACTIVE',
+      },
+    });
+  }
+
+  async updateVehicle(providerId: string, vehicleId: string, input: UpdateVehicleInput) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, providerId },
+    });
+
+    if (!vehicle) {
+      throw new Error('Vehicle not found or you are not authorized to modify it');
+    }
+
+    return prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: {
+        make: input.make,
+        model: input.model,
+        year: input.year,
+        capacity: input.capacity,
+        photoUrl: input.photoUrl !== undefined ? input.photoUrl : vehicle.photoUrl,
+        status: input.status,
+      },
+    });
+  }
+
+  async deleteVehicle(providerId: string, vehicleId: string) {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, providerId },
+      include: {
+        routes: {
+          where: { status: 'ACTIVE' },
+        },
+      },
+    });
+
+    if (!vehicle) {
+      throw new Error('Vehicle not found');
+    }
+
+    if (vehicle.routes.length > 0) {
+      throw new Error('Cannot delete vehicle while active routes are assigned to it. Please deactivate the routes first.');
+    }
+
+    return prisma.vehicle.delete({
+      where: { id: vehicleId },
+    });
+  }
+
+  // ==========================================
+  // Route Management for Providers
+  // ==========================================
+
+  async getProviderRoutes(providerId: string) {
+    return prisma.route.findMany({
+      where: { providerId },
+      include: {
+        vehicle: true,
+        stops: { orderBy: { orderIndex: 'asc' } },
+        _count: {
+          select: {
+            agreements: { where: { status: 'ACTIVE' } },
+            requests: { where: { status: 'PENDING' } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createRoute(providerId: string, input: CreateRouteInput) {
+    // Verify vehicle belongs to provider
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: input.vehicleId, providerId },
+    });
+
+    if (!vehicle) {
+      throw new Error('Assigned vehicle not found or does not belong to your account');
+    }
+
+    const routeCapacity = input.capacity || vehicle.capacity;
+
+    return prisma.route.create({
+      data: {
+        providerId,
+        vehicleId: input.vehicleId,
+        name: input.name,
+        origin: input.origin,
+        destinationSchool: input.destinationSchool,
+        schoolBranch: input.schoolBranch,
+        departureTimeMorning: input.departureTimeMorning,
+        departureTimeAfternoon: input.departureTimeAfternoon,
+        serviceType: input.serviceType,
+        capacity: routeCapacity,
+        availableSeats: routeCapacity,
+        monthlyPrice: input.monthlyPrice,
+        isAcceptingPassengers: true,
+        status: 'ACTIVE',
+        stops: input.stops && input.stops.length > 0
+          ? {
+              create: input.stops.map((stop: any, idx: number) => ({
+                name: stop.name,
+                pickupTimeMorning: stop.pickupTimeMorning,
+                dropoffTimeAfternoon: stop.dropoffTimeAfternoon,
+                orderIndex: stop.orderIndex !== undefined ? stop.orderIndex : idx,
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        vehicle: true,
+        stops: { orderBy: { orderIndex: 'asc' } },
+      },
+    });
+  }
+
+  async updateRoute(providerId: string, routeId: string, input: UpdateRouteInput) {
+    const route = await prisma.route.findFirst({
+      where: { id: routeId, providerId },
+    });
+
+    if (!route) {
+      throw new Error('Route not found or you are not authorized to edit it');
+    }
+
+    return prisma.route.update({
+      where: { id: routeId },
+      data: {
+        name: input.name,
+        origin: input.origin,
+        destinationSchool: input.destinationSchool,
+        schoolBranch: input.schoolBranch,
+        departureTimeMorning: input.departureTimeMorning,
+        departureTimeAfternoon: input.departureTimeAfternoon,
+        serviceType: input.serviceType,
+        monthlyPrice: input.monthlyPrice,
+        status: input.status,
+        isAcceptingPassengers: input.isAcceptingPassengers,
+      },
+      include: {
+        vehicle: true,
+        stops: { orderBy: { orderIndex: 'asc' } },
+      },
+    });
+  }
+
+  async deleteRoute(providerId: string, routeId: string) {
+    const route = await prisma.route.findFirst({
+      where: { id: routeId, providerId },
+      include: {
+        agreements: { where: { status: 'ACTIVE' } },
+      },
+    });
+
+    if (!route) {
+      throw new Error('Route not found');
+    }
+
+    if (route.agreements.length > 0) {
+      // Instead of hard delete, safely deactivate to preserve contracts
+      return prisma.route.update({
+        where: { id: routeId },
+        data: { status: 'INACTIVE', isAcceptingPassengers: false },
+      });
+    }
+
+    return prisma.route.delete({
+      where: { id: routeId },
+    });
+  }
+
+  // ==========================================
+  // Trips & Live Transit Control
+  // ==========================================
+
+  async getTrips(userId: string, role: string, routeId?: string) {
+    const where: any = {};
+    if (routeId) where.routeId = routeId;
+
+    if (role === 'TRANSPORT_PROVIDER' || role === 'DRIVER') {
+      where.OR = [
+        { driverId: userId },
+        { route: { providerId: userId } },
+      ];
+    } else if (role === 'PARENT') {
+      // Return trips corresponding to parent's active agreements
+      const parentAgreements = await prisma.transportationAgreement.findMany({
+        where: { parentId: userId, status: 'ACTIVE' },
+        select: { routeId: true },
+      });
+      const routeIds = parentAgreements.map((a: any) => a.routeId);
+      where.routeId = { in: routeIds };
+    }
+
+    return prisma.trip.findMany({
+      where,
+      include: {
+        route: true,
+        vehicle: true,
+        driver: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        passengers: {
+          include: {
+            student: true,
+          },
+        },
+        locations: {
+          orderBy: { timestamp: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+  }
+
+  async createTrip(userId: string, input: CreateTripInput) {
+    // Verify route belongs to provider or driver
+    const route = await prisma.route.findFirst({
+      where: { id: input.routeId },
+      include: {
+        agreements: {
+          where: { status: 'ACTIVE' },
+          select: { studentId: true, pickupStopName: true },
+        },
+      },
+    });
+
+    if (!route) {
+      throw new Error('Route not found');
+    }
+
+    const driverId = input.driverId || userId;
+
+    // Create Trip and automatically populate passengers from active agreements
+    const trip = await prisma.trip.create({
+      data: {
+        routeId: input.routeId,
+        vehicleId: input.vehicleId,
+        driverId,
+        tripType: input.tripType,
+        status: 'SCHEDULED',
+        notes: input.notes,
+        passengers: {
+          create: route.agreements.map((a: any) => ({
+            studentId: a.studentId,
+            pickupStopName: a.pickupStopName,
+            status: 'SCHEDULED',
+          })),
+        },
+      },
+      include: {
+        route: true,
+        vehicle: true,
+        passengers: { include: { student: true } },
+      },
+    });
+
+    return trip;
+  }
+
+  async updateTripStatus(tripId: string, status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
+    const updateData: any = { status };
+    if (status === 'IN_PROGRESS') {
+      updateData.startTime = new Date();
+    } else if (status === 'COMPLETED') {
+      updateData.endTime = new Date();
+    }
+
+    const updatedTrip = await prisma.trip.update({
+      where: { id: tripId },
+      data: updateData,
+      include: {
+        route: true,
+        vehicle: true,
+        passengers: { include: { student: true } },
+      },
+    });
+
+    // Notify trip room and subscribers
+    emitToTrip(tripId, 'trip_status_changed', {
+      tripId,
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return updatedTrip;
+  }
+
+  async getTripPassengers(tripId: string) {
+    return prisma.tripPassenger.findMany({
+      where: { tripId },
+      include: {
+        student: {
+          include: {
+            parent: {
+              select: { id: true, firstName: true, lastName: true, phone: true },
+            },
+            authorizedPickups: true,
+          },
+        },
+      },
+    });
+  }
+
+  async recordBoardingEvent(
+    userId: string,
+    tripId: string,
+    input: RecordBoardingInput,
+    userRole?: string
+  ) {
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { route: true },
+    });
+
+    if (!trip) {
+      const error: AppError = new Error('Trip not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isAssignedDriver = trip.driverId === userId;
+    const isRouteProvider = trip.route?.providerId === userId;
+
+    if (!isAdmin && !isAssignedDriver && !isRouteProvider) {
+      const error: AppError = new Error('Access denied: You are not authorized to record boarding events for this trip');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const student = await prisma.student.findUnique({
+      where: { id: input.studentId },
+      include: { parent: true },
+    });
+
+    if (!student) {
+      const error: AppError = new Error('Student not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // 1. Create Boarding Event log
+    const event = await prisma.boardingEvent.create({
+      data: {
+        tripId,
+        studentId: input.studentId,
+        eventType: input.eventType,
+        scannedStop: input.scannedStop || null,
+        latitude: input.latitude || null,
+        longitude: input.longitude || null,
+        notes: input.notes || null,
+      },
+    });
+
+    // 2. Update passenger manifest status
+    const passengerStatus = input.eventType === 'BOARDED' ? 'BOARDED' : 'DROPPED_OFF';
+    await prisma.tripPassenger.updateMany({
+      where: { tripId, studentId: input.studentId },
+      data: {
+        status: passengerStatus,
+        ...(input.eventType === 'BOARDED' ? { boardedAt: new Date() } : { droppedOffAt: new Date() }),
+      },
+    });
+
+    // 3. Send high-priority in-app notification to the child's parent
+    const eventLabel = input.eventType === 'BOARDED' ? 'safely boarded the bus' : 'safely arrived and dropped off';
+    await prisma.notification.create({
+      data: {
+        userId: student.parentId,
+        title: `Child Safety Update: ${student.firstName} ${student.lastName}`,
+        message: `${student.firstName} has ${eventLabel} for route ${trip.route.name}${input.scannedStop ? ` at ${input.scannedStop}` : ''}.`,
+        type: input.eventType === 'BOARDED' ? 'STUDENT_BOARDED' : 'STUDENT_DROPPED_OFF',
+        entityId: tripId,
+      },
+    });
+
+    // Real-time socket emission to parent
+    emitToUser(student.parentId, 'student:boarding_event', {
+      studentId: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      eventType: input.eventType,
+      tripId,
+      scannedStop: input.scannedStop,
+      timestamp: new Date().toISOString(),
+    });
+
+    return event;
+  }
+
+  async recordTripLocation(
+    tripId: string,
+    coords: { latitude: number; longitude: number; speed?: number; heading?: number },
+    userId?: string,
+    userRole?: string
+  ) {
+    if (
+      typeof coords.latitude !== 'number' ||
+      typeof coords.longitude !== 'number' ||
+      isNaN(coords.latitude) ||
+      isNaN(coords.longitude) ||
+      coords.latitude < -90 ||
+      coords.latitude > 90 ||
+      coords.longitude < -180 ||
+      coords.longitude > 180
+    ) {
+      const error: AppError = new Error('Invalid GPS coordinates. Latitude must be between -90 and 90, longitude between -180 and 180.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { route: true },
+    });
+
+    if (!trip) {
+      const error: AppError = new Error('Trip not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (trip.status !== 'IN_PROGRESS') {
+      const error: AppError = new Error(`Cannot record GPS location for trip with status '${trip.status}'. Trip must be IN_PROGRESS.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (userId) {
+      const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+      const isAssignedDriver = trip.driverId === userId;
+      const isRouteProvider = trip.route?.providerId === userId;
+
+      if (!isAdmin && !isAssignedDriver && !isRouteProvider) {
+        const error: AppError = new Error('Access denied: Only assigned driver or provider can post GPS telemetry for this trip');
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+
+    const loc = await prisma.tripLocation.create({
+      data: {
+        tripId,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        speed: coords.speed || 0,
+        heading: coords.heading || 0,
+      },
+    });
+
+    emitToTrip(tripId, 'trip_location_update', {
+      tripId,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      speed: coords.speed || 0,
+      heading: coords.heading || 0,
+      timestamp: loc.timestamp.toISOString(),
+    });
+
+    return loc;
+  }
+
+  async getLatestTripLocation(tripId: string, userId?: string, userRole?: string) {
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        route: true,
+        passengers: {
+          include: { student: true },
+        },
+      },
+    });
+
+    if (!trip) {
+      const error: AppError = new Error('Trip not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (userId) {
+      const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+      const isAssignedDriver = trip.driverId === userId;
+      const isRouteProvider = trip.route?.providerId === userId;
+      const hasEnrolledChild = trip.passengers.some((p: any) => p.student?.parentId === userId);
+
+      if (!isAdmin && !isAssignedDriver && !isRouteProvider && !hasEnrolledChild) {
+        const error: AppError = new Error('Access denied: You do not have permission to view location for this journey');
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+
+    return prisma.tripLocation.findFirst({
+      where: { tripId },
+      orderBy: { timestamp: 'desc' },
+    });
+  }
+
+  // ==========================================
+  // Child Safety & Incident Management
+  // ==========================================
+
+  async getAuthorizedPickups(studentId: string, userId?: string, userRole?: string) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (!student) {
+      const error: AppError = new Error('Student not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (userId) {
+      const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+      const isParent = student.parentId === userId;
+
+      if (!isAdmin && !isParent) {
+        const hasActiveTrip = await prisma.tripPassenger.findFirst({
+          where: {
+            studentId,
+            trip: {
+              OR: [
+                { driverId: userId },
+                { route: { providerId: userId } },
+              ],
+            },
+          },
+        });
+
+        if (!hasActiveTrip) {
+          const error: AppError = new Error('Access denied: You are not authorized to view pickup contacts for this child');
+          error.statusCode = 403;
+          throw error;
+        }
+      }
+    }
+
+    return prisma.authorizedPickupPerson.findMany({
+      where: { studentId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createAuthorizedPickup(parentId: string, input: CreateAuthorizedPickupInput) {
+    // Verify parent owns student
+    const student = await prisma.student.findFirst({
+      where: { id: input.studentId, parentId },
+    });
+
+    if (!student) {
+      throw new Error('Student not found or access denied');
+    }
+
+    return prisma.authorizedPickupPerson.create({
+      data: {
+        studentId: input.studentId,
+        fullName: input.fullName,
+        relationship: input.relationship,
+        phone: input.phone,
+        idNumber: input.idNumber,
+        photoUrl: input.photoUrl,
+        isEmergencyContact: input.isEmergencyContact,
+      },
+    });
+  }
+
+  async deleteAuthorizedPickup(parentId: string, studentId: string, pickupId: string) {
+    const student = await prisma.student.findFirst({
+      where: { id: studentId, parentId },
+    });
+
+    if (!student) {
+      throw new Error('Student not found or access denied');
+    }
+
+    return prisma.authorizedPickupPerson.delete({
+      where: { id: pickupId },
+    });
+  }
+
+  async createSafetyIncident(userId: string, input: CreateSafetyIncidentInput) {
+    return prisma.safetyIncident.create({
+      data: {
+        reportedById: userId,
+        title: input.title,
+        description: input.description,
+        severity: input.severity,
+        tripId: input.tripId || null,
+        routeId: input.routeId || null,
+        vehicleId: input.vehicleId || null,
+        location: input.location || null,
+        status: 'OPEN',
+      },
+    });
+  }
+
+  async getSafetyIncidents(userId: string, role: string) {
+    if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
+      return prisma.safetyIncident.findMany({
+        include: {
+          reportedBy: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          route: true,
+          vehicle: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    return prisma.safetyIncident.findMany({
+      where: { reportedById: userId },
+      include: {
+        route: true,
+        vehicle: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }
 
 export const transportationService = new TransportationService();
+

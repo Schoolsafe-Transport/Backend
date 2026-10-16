@@ -6,13 +6,12 @@ import { env } from './config/env';
 import { swaggerSpec } from './config/swagger';
 import { requestLogger } from './middleware/requestLogger';
 import { errorHandler } from './middleware/errorHandler';
+import { generalRateLimiter } from './middleware/rateLimiter';
 import apiRoutes from './routes';
 
 const app: Application = express();
-
-// Security Middlewares
 app.use(helmet({
-  contentSecurityPolicy: false, // Allows Swagger UI to load its assets
+  contentSecurityPolicy: false,
 }));
 app.use(
   cors({
@@ -31,8 +30,8 @@ app.use(express.urlencoded({ extended: true }));
 // Swagger UI Documentation Endpoint
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// API Root Router
-app.use('/api', apiRoutes);
+// API Root Router with General Rate Limiting
+app.use('/api', generalRateLimiter, apiRoutes);
 
 // Root Index Redirect to API docs
 app.get('/', (_req: Request, res: Response) => {

@@ -51,9 +51,18 @@ export const changePasswordSchema = z.object({
   newPassword: passwordValidation,
 });
 
+export const updateProfileSchema = z.object({
+  firstName: z.string().min(2, 'First name must be at least 2 characters').trim().optional(),
+  lastName: z.string().min(2, 'Last name must be at least 2 characters').trim().optional(),
+  phone: z.string().optional(),
+  profilePhoto: z.string().url('Invalid photo URL').optional().or(z.literal('')),
+});
+
 export type RegisterInput = zInfer<typeof registerSchema>;
 export type LoginInput = zInfer<typeof loginSchema>;
 export type RefreshTokenInput = zInfer<typeof refreshTokenSchema>;
 export type ForgotPasswordInput = zInfer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = zInfer<typeof resetPasswordSchema>;
 export type ChangePasswordInput = zInfer<typeof changePasswordSchema>;
+export type UpdateProfileInput = zInfer<typeof updateProfileSchema>;
+

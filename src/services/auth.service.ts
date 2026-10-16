@@ -15,6 +15,8 @@ import {
   AuthResponse,
   AuthTokens,
   UserSanitized,
+  ChangePasswordInput,
+  UpdateProfileInput,
 } from '../types/auth.types';
 import { AppError } from '../middleware/errorHandler';
 
@@ -39,6 +41,18 @@ export class AuthService {
           : 'An account with this phone number already exists'
       );
       error.statusCode = 409;
+      throw error;
+    }
+
+    if (input.role === 'SUPER_ADMIN') {
+      const error: AppError = new Error('SUPER_ADMIN accounts cannot be registered via public registration');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (input.role === 'ADMIN' && env.NODE_ENV === 'production') {
+      const error: AppError = new Error('ADMIN accounts cannot be registered publicly in production');
+      error.statusCode = 403;
       throw error;
     }
 
@@ -325,6 +339,83 @@ export class AuthService {
     }
 
     return sanitizeUser(user);
+  }
+
+  /**
+   * Changes password for an authenticated user after verifying current password.
+   */
+  async changePassword(userId: string, input: ChangePasswordInput): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isValid = await comparePassword(input.currentPassword, user.passwordHash);
+    if (!isValid) {
+      const error: AppError = new Error('Current password is incorrect');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const newHashedPassword = await hashPassword(input.newPassword);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newHashedPassword },
+    });
+
+    // Revoke all existing refresh tokens for security
+    await prisma.refreshToken.updateMany({
+      where: { userId },
+      data: { revoked: true },
+    });
+
+    return {
+      message: 'Password changed successfully. Please log in again with your new credentials.',
+    };
+  }
+
+  /**
+   * Updates profile information (first name, last name, phone, profile photo).
+   */
+  async updateProfile(userId: string, input: UpdateProfileInput): Promise<UserSanitized> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (input.phone && input.phone !== user.phone) {
+      const existingPhone = await prisma.user.findFirst({
+        where: { phone: input.phone, NOT: { id: userId } },
+      });
+      if (existingPhone) {
+        const error: AppError = new Error('Phone number is already associated with another account');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(input.firstName ? { firstName: input.firstName } : {}),
+        ...(input.lastName ? { lastName: input.lastName } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone || null } : {}),
+        ...(input.profilePhoto !== undefined ? { profilePhoto: input.profilePhoto || null } : {}),
+      },
+    });
+
+    return sanitizeUser(updated);
   }
 }
 

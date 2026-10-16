@@ -10,6 +10,14 @@ import {
   cancelAgreementSchema,
   processPaymentSchema,
   createStudentSchema,
+  createVehicleSchema,
+  updateVehicleSchema,
+  createRouteSchema,
+  updateRouteSchema,
+  createTripSchema,
+  recordBoardingSchema,
+  createAuthorizedPickupSchema,
+  createSafetyIncidentSchema,
 } from '../schemas/transportation.schema';
 
 export class TransportationController {
@@ -241,6 +249,290 @@ export class TransportationController {
       next(error);
     }
   }
+
+  // ==========================================
+  // Fleet / Vehicles
+  // ==========================================
+
+  async getVehicles(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const vehicles = await transportationService.getVehicles(req.user!.id);
+      res.json({
+        success: true,
+        data: vehicles,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createVehicle(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = createVehicleSchema.parse(req.body);
+      const vehicle = await transportationService.createVehicle(req.user!.id, validated);
+      res.status(201).json({
+        success: true,
+        message: 'Vehicle registered successfully. Under verification review.',
+        data: vehicle,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateVehicle(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = updateVehicleSchema.parse(req.body);
+      const vehicle = await transportationService.updateVehicle(req.user!.id, req.params.id, validated);
+      res.json({
+        success: true,
+        message: 'Vehicle updated successfully',
+        data: vehicle,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteVehicle(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await transportationService.deleteVehicle(req.user!.id, req.params.id);
+      res.json({
+        success: true,
+        message: 'Vehicle deleted successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // Routes Management
+  // ==========================================
+
+  async getProviderRoutes(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const routes = await transportationService.getProviderRoutes(req.user!.id);
+      res.json({
+        success: true,
+        data: routes,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createRoute(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = createRouteSchema.parse(req.body);
+      const route = await transportationService.createRoute(req.user!.id, validated);
+      res.status(201).json({
+        success: true,
+        message: 'Transportation route created successfully',
+        data: route,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateRoute(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = updateRouteSchema.parse(req.body);
+      const route = await transportationService.updateRoute(req.user!.id, req.params.id, validated);
+      res.json({
+        success: true,
+        message: 'Route updated successfully',
+        data: route,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteRoute(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await transportationService.deleteRoute(req.user!.id, req.params.id);
+      res.json({
+        success: true,
+        message: 'Route removed or deactivated successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // Trips & Boarding
+  // ==========================================
+
+  async getTrips(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const routeId = req.query.routeId as string | undefined;
+      const trips = await transportationService.getTrips(req.user!.id, req.user!.role, routeId);
+      res.json({
+        success: true,
+        data: trips,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createTrip(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = createTripSchema.parse(req.body);
+      const trip = await transportationService.createTrip(req.user!.id, validated);
+      res.status(201).json({
+        success: true,
+        message: 'Transit run trip scheduled successfully',
+        data: trip,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateTripStatus(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { status } = req.body;
+      const trip = await transportationService.updateTripStatus(req.params.id, status);
+      res.json({
+        success: true,
+        message: `Trip status updated to ${status}`,
+        data: trip,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getTripPassengers(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const passengers = await transportationService.getTripPassengers(req.params.id);
+      res.json({
+        success: true,
+        data: passengers,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async recordBoardingEvent(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = recordBoardingSchema.parse(req.body);
+      const event = await transportationService.recordBoardingEvent(req.user!.id, req.params.id, validated, req.user?.role);
+      res.status(201).json({
+        success: true,
+        message: `Student successfully recorded as ${validated.eventType}`,
+        data: event,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async recordTripLocation(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { latitude, longitude, speed, heading } = req.body;
+      const loc = await transportationService.recordTripLocation(req.params.id, {
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        speed: speed ? Number(speed) : 0,
+        heading: heading ? Number(heading) : 0,
+      }, req.user?.id, req.user?.role);
+      res.status(201).json({
+        success: true,
+        data: loc,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getLatestTripLocation(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const loc = await transportationService.getLatestTripLocation(req.params.id, req.user?.id, req.user?.role);
+      res.json({
+        success: true,
+        data: loc,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // ==========================================
+  // Authorized Pickups & Safety Incidents
+  // ==========================================
+
+  async getAuthorizedPickups(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { studentId } = req.params;
+      const pickups = await transportationService.getAuthorizedPickups(studentId, req.user?.id, req.user?.role);
+      res.json({
+        success: true,
+        data: pickups,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createAuthorizedPickup(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = createAuthorizedPickupSchema.parse(req.body);
+      const pickup = await transportationService.createAuthorizedPickup(req.user!.id, validated);
+      res.status(201).json({
+        success: true,
+        message: 'Authorized pickup delegate registered',
+        data: pickup,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteAuthorizedPickup(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { studentId, pickupId } = req.params;
+      await transportationService.deleteAuthorizedPickup(req.user!.id, studentId, pickupId);
+      res.json({
+        success: true,
+        message: 'Authorized pickup contact removed',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createSafetyIncident(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validated = createSafetyIncidentSchema.parse(req.body);
+      const incident = await transportationService.createSafetyIncident(req.user!.id, validated);
+      res.status(201).json({
+        success: true,
+        message: 'Safety incident reported. Support and dispatch notified immediately.',
+        data: incident,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getSafetyIncidents(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const incidents = await transportationService.getSafetyIncidents(req.user!.id, req.user!.role);
+      res.json({
+        success: true,
+        data: incidents,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const transportationController = new TransportationController();
+

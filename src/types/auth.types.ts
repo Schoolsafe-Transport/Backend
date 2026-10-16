@@ -28,6 +28,7 @@ export interface UserSanitized {
   role: UserRole;
   status: UserStatus;
   isVerified: boolean;
+  profilePhoto?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,3 +61,16 @@ export interface LoginInput {
   email: string;
   password: string;
 }
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface UpdateProfileInput {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  profilePhoto?: string;
+}
+
