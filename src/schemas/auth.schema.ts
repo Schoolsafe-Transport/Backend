@@ -8,25 +8,31 @@ const passwordValidation = z
   .regex(/[0-9]/, 'Password must contain at least 1 number')
   .regex(/[^A-Za-z0-9]/, 'Password must contain at least 1 special character');
 
-export const registerSchema = z.object({
-  email: z.string().email('Invalid email address').toLowerCase().trim(),
-  password: passwordValidation,
-  firstName: z.string().min(2, 'First name must be at least 2 characters').trim(),
-  lastName: z.string().min(2, 'Last name must be at least 2 characters').trim(),
-  phone: z.string().optional(),
-  role: z
-    .enum([
-      'PARENT',
-      'STUDENT',
-      'SCHOOL_ADMIN',
-      'TRANSPORT_PROVIDER',
-      'DRIVER',
-      'BUSINESS',
-      'ADMIN',
-      'SUPER_ADMIN',
-    ])
-    .default('PARENT'),
-});
+export const registerSchema = z
+  .object({
+    email: z.string().email('Invalid email address').toLowerCase().trim(),
+    password: passwordValidation,
+    confirmPassword: z.string().optional(),
+    firstName: z.string().min(2, 'First name must be at least 2 characters').trim(),
+    lastName: z.string().min(2, 'Last name must be at least 2 characters').trim(),
+    phone: z.string().optional(),
+    role: z
+      .enum([
+        'PARENT',
+        'STUDENT',
+        'SCHOOL_ADMIN',
+        'TRANSPORT_PROVIDER',
+        'DRIVER',
+        'BUSINESS',
+        'ADMIN',
+        'SUPER_ADMIN',
+      ])
+      .default('PARENT'),
+  })
+  .refine((data: any) => !data.confirmPassword || data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
 export const loginSchema = z.object({
   email: z.string().email('Invalid email address').toLowerCase().trim(),
@@ -41,15 +47,27 @@ export const forgotPasswordSchema = z.object({
   email: z.string().email('Invalid email address').toLowerCase().trim(),
 });
 
-export const resetPasswordSchema = z.object({
-  token: z.string().min(1, 'Reset token is required'),
-  newPassword: passwordValidation,
-});
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1, 'Reset token is required'),
+    newPassword: passwordValidation,
+    confirmPassword: z.string().optional(),
+  })
+  .refine((data: any) => !data.confirmPassword || data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
-export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: passwordValidation,
-});
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: passwordValidation,
+    confirmPassword: z.string().optional(),
+  })
+  .refine((data: any) => !data.confirmPassword || data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
 export const updateProfileSchema = z.object({
   firstName: z.string().min(2, 'First name must be at least 2 characters').trim().optional(),

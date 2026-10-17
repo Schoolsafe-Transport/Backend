@@ -76,6 +76,37 @@ describe('Authentication & RBAC Test Suite', () => {
       expect(res.body.success).toBe(false);
     });
 
+    it('should reject registration if confirmPassword does not match password', async () => {
+      const res = await request(app).post('/api/auth/register').send({
+        email: `mismatch_${Date.now()}@schoolsafe.org`,
+        password: 'Password123!',
+        confirmPassword: 'MismatchPassword123!',
+        firstName: 'Test',
+        lastName: 'Mismatch',
+        role: 'PARENT',
+      });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('Passwords do not match');
+    });
+
+    it('should accept registration when confirmPassword matches password', async () => {
+      const validEmail = `match_${Date.now()}@schoolsafe.org`;
+      const res = await request(app).post('/api/auth/register').send({
+        email: validEmail,
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        firstName: 'Test',
+        lastName: 'Match',
+        role: 'PARENT',
+      });
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+
+      // Clean up test user
+      await prisma.refreshToken.deleteMany({ where: { user: { email: validEmail } } });
+      await prisma.user.deleteMany({ where: { email: validEmail } });
+    });
+
     it('should reject registration with weak password (missing special char or short)', async () => {
       const res = await request(app).post('/api/auth/register').send({
         email: 'weakpass@schoolsafe.org',
@@ -194,6 +225,16 @@ describe('Authentication & RBAC Test Suite', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.resetToken).toBeDefined();
       resetToken = res.body.resetToken;
+    });
+
+    it('should reject password reset when confirmPassword does not match newPassword', async () => {
+      const res = await request(app).post('/api/auth/reset-password').send({
+        token: resetToken,
+        newPassword: 'NewSecretPassword456!',
+        confirmPassword: 'WrongConfirmation456!',
+      });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('Passwords do not match');
     });
 
     it('should reset password with valid token and allow login with new password', async () => {
