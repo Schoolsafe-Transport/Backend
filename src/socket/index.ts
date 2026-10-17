@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { env } from '../config/env';
 import { verifyAccessToken } from '../utils/security.util';
+import { prisma } from '../config/prisma';
 
 let ioInstance: any = null;
 
@@ -59,12 +60,53 @@ export const initSocketIO = (httpServer: HttpServer): any => {
       }
     });
 
-    // Trip room subscription for live tracking
-    socket.on('join_trip', (data: { tripId: string; token?: string } | string) => {
-      const tripId = typeof data === 'string' ? data : data?.tripId;
-      if (tripId && typeof tripId === 'string') {
+    // Trip room subscription for live tracking with family/driver access verification
+    socket.on('join_trip', async (data: { tripId: string; token?: string } | string) => {
+      try {
+        const tripId = typeof data === 'string' ? data : data?.tripId;
+        if (!tripId || typeof tripId !== 'string') return;
+
+        const authToken = (typeof data !== 'string' && data?.token) || socket.handshake?.auth?.token;
+        if (authToken) {
+          try {
+            const decoded = verifyAccessToken(authToken);
+            const isAdmin = decoded.role === 'ADMIN' || decoded.role === 'SUPER_ADMIN';
+
+            if (!isAdmin) {
+              const trip = await prisma.trip.findUnique({
+                where: { id: tripId },
+                include: {
+                  route: true,
+                  passengers: {
+                    include: { student: true },
+                  },
+                },
+              });
+
+              if (trip) {
+                const isAssignedDriver = trip.driverId === decoded.userId;
+                const isRouteProvider = trip.route?.providerId === decoded.userId;
+                const hasChild = trip.passengers.some((p: any) => p.student?.parentId === decoded.userId);
+
+                if (!isAssignedDriver && !isRouteProvider && !hasChild) {
+                  socket.emit('auth_error', { message: 'Unauthorized: You do not have permission to view tracking for this trip' });
+                  return;
+                }
+              }
+            }
+          } catch (_err) {
+            socket.emit('auth_error', { message: 'Invalid or expired socket token' });
+            return;
+          }
+        } else if (env.NODE_ENV === 'production') {
+          socket.emit('auth_error', { message: 'Authentication required to subscribe to live trip tracking' });
+          return;
+        }
+
         socket.join(`trip:${tripId}`);
         socket.emit('joined_trip', { tripId });
+      } catch (err) {
+        // Safe catch
       }
     });
 
@@ -75,12 +117,55 @@ export const initSocketIO = (httpServer: HttpServer): any => {
       }
     });
 
-    // Driver live GPS emission
-    socket.on('driver_location', (data: { tripId: string; latitude: number; longitude: number; speed?: number; heading?: number }) => {
+    // Driver live GPS emission with coordinate boundary validation and stale coordinate handling
+    socket.on('driver_location', async (data: {
+      tripId: string;
+      latitude: number;
+      longitude: number;
+      speed?: number;
+      heading?: number;
+      timestamp?: string | number;
+      token?: string;
+      isSimulated?: boolean;
+    }) => {
       if (data && data.tripId) {
         // Validate geographic coordinate boundaries
         if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') return;
         if (data.latitude < -90 || data.latitude > 90 || data.longitude < -180 || data.longitude > 180) return;
+
+        // Discard stale coordinates (older than 120 seconds or future beyond 30s)
+        if (data.timestamp) {
+          const clientTime = typeof data.timestamp === 'string' ? new Date(data.timestamp).getTime() : data.timestamp;
+          const now = Date.now();
+          if (now - clientTime > 120000 || clientTime - now > 30000) {
+            return;
+          }
+        }
+
+        const authToken = data.token || socket.handshake?.auth?.token;
+        if (authToken) {
+          try {
+            const decoded = verifyAccessToken(authToken);
+            const isAdmin = decoded.role === 'ADMIN' || decoded.role === 'SUPER_ADMIN';
+            if (!isAdmin) {
+              const trip = await prisma.trip.findUnique({
+                where: { id: data.tripId },
+                include: { route: true },
+              });
+              if (trip) {
+                const isAssignedDriver = trip.driverId === decoded.userId;
+                const isRouteProvider = trip.route?.providerId === decoded.userId;
+                if (!isAssignedDriver && !isRouteProvider) {
+                  socket.emit('auth_error', { message: 'Unauthorized driver location telemetry' });
+                  return;
+                }
+              }
+            }
+          } catch (_err) {
+            socket.emit('auth_error', { message: 'Invalid or expired token for driver location' });
+            return;
+          }
+        }
 
         // Broadcast to all tracking parents/admins in this trip's room
         (io as any).to(`trip:${data.tripId}`).emit('trip_location_update', {
@@ -89,6 +174,7 @@ export const initSocketIO = (httpServer: HttpServer): any => {
           longitude: data.longitude,
           speed: data.speed || 0,
           heading: data.heading || 0,
+          isSimulated: !!data.isSimulated,
           timestamp: new Date().toISOString(),
         });
       }
