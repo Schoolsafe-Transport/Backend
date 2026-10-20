@@ -227,6 +227,55 @@ describe('Transportation Marketplace Test Suite', () => {
       expect(match).toBeUndefined();
     });
 
+    it('should filter correctly by school branch', async () => {
+      const res = await request(app)
+        .get('/api/transportation/search')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .query({ school: 'Cambridge Academy', schoolBranch: 'Main Campus' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      const match = res.body.data.find((r: any) => r.routeId === routeId);
+      expect(match).toBeDefined();
+      expect(match.schoolBranch).toBe('Main Campus');
+    });
+
+    it('should return empty list when school branch does not match', async () => {
+      const res = await request(app)
+        .get('/api/transportation/search')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .query({ school: 'Cambridge Academy', schoolBranch: 'NonExistent Branch' });
+
+      expect(res.status).toBe(200);
+      const match = res.body.data.find((r: any) => r.routeId === routeId);
+      expect(match).toBeUndefined();
+    });
+
+    it('should filter correctly by vehicle type', async () => {
+      const res = await request(app)
+        .get('/api/transportation/search')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .query({ vehicleType: 'HiAce' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      const match = res.body.data.find((r: any) => r.routeId === routeId);
+      expect(match).toBeDefined();
+    });
+
+    it('should filter correctly by verified provider status', async () => {
+      const res = await request(app)
+        .get('/api/transportation/search')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .query({ verified: 'true' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.length).toBeGreaterThanOrEqual(1);
+      res.body.data.forEach((r: any) => {
+        expect(r.provider.isVerified).toBe(true);
+      });
+    });
+
     it('should retrieve detailed route profile', async () => {
       const res = await request(app)
         .get(`/api/transportation/routes/${routeId}`)
@@ -240,7 +289,34 @@ describe('Transportation Marketplace Test Suite', () => {
   });
 
   describe('2. Transportation Requests & Security', () => {
-    it('should reject request when parent attempts to request for another parent child', async () => {
+    it('should reject request when parent has not completed Fayda identity verification', async () => {
+      const res = await request(app)
+        .post('/api/transportation/requests')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          studentId,
+          routeId,
+          pickupStopId: stopId,
+          pickupStopName: 'Ayder Hospital Gate',
+          preferredStartDate: '2026-11-01',
+          proposedPrice: 3200,
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.message).toContain('Identity verification required');
+    });
+
+    it('should reject request when parent attempts to request for another parent child after verification', async () => {
+      // Mark parents as verified to unlock request capabilities
+      await prisma.user.update({
+        where: { id: parentId },
+        data: { isVerified: true },
+      });
+      await prisma.user.update({
+        where: { id: otherParentId },
+        data: { isVerified: true },
+      });
+
       const res = await request(app)
         .post('/api/transportation/requests')
         .set('Authorization', `Bearer ${parentToken}`)
@@ -257,7 +333,36 @@ describe('Transportation Marketplace Test Suite', () => {
       expect(res.body.message).toContain('only request transportation for your own child');
     });
 
-    it('should allow parent to submit a seat request for own child without reducing available seats', async () => {
+    it('should reject request if route is stale or has 0 available seats', async () => {
+      // Temporarily mark route availableSeats = 0
+      await prisma.route.update({
+        where: { id: routeId },
+        data: { availableSeats: 0 },
+      });
+
+      const res = await request(app)
+        .post('/api/transportation/requests')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          studentId,
+          routeId,
+          pickupStopId: stopId,
+          pickupStopName: 'Ayder Hospital Gate',
+          preferredStartDate: '2026-11-01',
+          proposedPrice: 3200,
+        });
+
+      // Restore seats
+      await prisma.route.update({
+        where: { id: routeId },
+        data: { availableSeats: 3 },
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('no available seats');
+    });
+
+    it('should allow verified parent to submit a seat request for own child without reducing available seats', async () => {
       const beforeRoute = await prisma.route.findUnique({ where: { id: routeId } });
       expect(beforeRoute?.availableSeats).toBe(3);
 
