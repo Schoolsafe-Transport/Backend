@@ -13,9 +13,9 @@ export const registerSchema = z
     email: z.string().email('Invalid email address').toLowerCase().trim(),
     password: passwordValidation,
     confirmPassword: z.string().optional(),
-    firstName: z.string().min(2, 'First name must be at least 2 characters').trim(),
-    lastName: z.string().min(2, 'Last name must be at least 2 characters').trim(),
-    phone: z.string().optional(),
+    firstName: z.string().trim().min(2, 'First name must be at least 2 characters'),
+    lastName: z.string().trim().min(2, 'Last name must be at least 2 characters'),
+    phone: z.string().trim().optional().or(z.literal('')),
     role: z
       .enum([
         'PARENT',

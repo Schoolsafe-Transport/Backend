@@ -5,15 +5,20 @@ export const transportationSearchQuerySchema = z.object({
   schoolBranch: z.string().optional(),
   pickupArea: z.string().optional(),
   route: z.string().optional(),
+  vehicleType: z.string().optional(),
   minPrice: z.coerce.number().positive().optional(),
   maxPrice: z.coerce.number().positive().optional(),
   minSeats: z.coerce.number().int().positive().optional(),
   minRating: z.coerce.number().min(0).max(5).optional(),
   serviceType: z.enum(['MORNING', 'AFTERNOON', 'BOTH']).optional(),
   verified: z
-    .string()
+    .union([z.boolean(), z.string()])
     .optional()
-    .transform((val?: string) => val === undefined || val === 'true'),
+    .transform((val?: string | boolean) => {
+      if (val === undefined || val === '') return undefined;
+      if (typeof val === 'boolean') return val;
+      return val === 'true';
+    }),
 });
 
 export const createTransportationRequestSchema = z.object({

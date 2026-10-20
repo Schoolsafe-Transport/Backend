@@ -34,7 +34,7 @@ export class TransportationService {
       },
     };
 
-    if (query.verified) {
+    if (query.verified === true) {
       where.provider = {
         isVerified: true,
         status: 'ACTIVE',
@@ -42,6 +42,20 @@ export class TransportationService {
       where.vehicle = {
         isVerified: true,
         status: 'ACTIVE',
+      };
+    } else if (query.verified === false) {
+      where.provider = {
+        isVerified: false,
+      };
+    }
+
+    if (query.vehicleType) {
+      where.vehicle = {
+        ...(where.vehicle || {}),
+        OR: [
+          { make: { contains: query.vehicleType, mode: 'insensitive' } },
+          { model: { contains: query.vehicleType, mode: 'insensitive' } },
+        ],
       };
     }
 
@@ -264,6 +278,25 @@ export class TransportationService {
    * Submit seat request. Initial status is PENDING and does NOT reduce seats.
    */
   async createRequest(parentId: string, input: CreateTransportationRequestInput) {
+    // 0. Identity verification check: Parent must be verified with Ethiopian Fayda National ID
+    const parent = await prisma.user.findUnique({
+      where: { id: parentId },
+    });
+
+    if (!parent) {
+      const err: any = new Error('Parent user not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (!parent.isVerified) {
+      const err: any = new Error(
+        'Identity verification required: Parents must verify their Ethiopian Fayda National ID before requesting school transportation'
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+
     // 1. Ownership check: student must belong to the parent
     const student = await prisma.student.findUnique({
       where: { id: input.studentId },
@@ -287,8 +320,8 @@ export class TransportationService {
       throw err;
     }
 
-    if (route.status !== 'ACTIVE' || !route.isAcceptingPassengers) {
-      const err: any = new Error('This route is currently not accepting new passengers');
+    if (route.status !== 'ACTIVE' || !route.isAcceptingPassengers || route.availableSeats <= 0) {
+      const err: any = new Error('This route is currently not accepting new passengers or has no available seats');
       err.statusCode = 400;
       throw err;
     }
