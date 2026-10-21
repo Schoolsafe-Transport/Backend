@@ -76,6 +76,14 @@ export const updateProfileSchema = z.object({
   profilePhoto: z.string().url('Invalid photo URL').optional().or(z.literal('')),
 });
 
+export const verifyEmailSchema = z.object({
+  token: z.string().min(1, 'Verification token is required'),
+});
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email('Invalid email address').toLowerCase().trim().optional(),
+});
+
 export type RegisterInput = zInfer<typeof registerSchema>;
 export type LoginInput = zInfer<typeof loginSchema>;
 export type RefreshTokenInput = zInfer<typeof refreshTokenSchema>;
@@ -83,4 +91,6 @@ export type ForgotPasswordInput = zInfer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = zInfer<typeof resetPasswordSchema>;
 export type ChangePasswordInput = zInfer<typeof changePasswordSchema>;
 export type UpdateProfileInput = zInfer<typeof updateProfileSchema>;
+export type VerifyEmailInput = zInfer<typeof verifyEmailSchema>;
+export type ResendVerificationInput = zInfer<typeof resendVerificationSchema>;
 

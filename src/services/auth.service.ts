@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../config/prisma';
 import { env } from '../config/env';
+import { emailService } from './email.service';
 import {
   hashPassword,
   comparePassword,
@@ -22,9 +23,52 @@ import { AppError } from '../middleware/errorHandler';
 
 export class AuthService {
   /**
-   * Registers a new user account with role selection, password hashing, and token issuance.
+   * Generates a cryptographically secure, time-limited single-use email verification token.
+   * Stores the SHA-256 hash in the database and applies a 60-second resend rate limit.
    */
-  async register(input: RegisterInput): Promise<AuthResponse> {
+  async generateEmailVerificationToken(userId: string): Promise<string> {
+    // 60-second rate limiting per user
+    const recentToken = await prisma.emailVerificationToken.findFirst({
+      where: {
+        userId,
+        createdAt: { gte: new Date(Date.now() - 60 * 1000) },
+      },
+    });
+
+    if (recentToken) {
+      const error: AppError = new Error('Verification email was sent recently. Please wait 60 seconds before requesting another.');
+      error.statusCode = 429;
+      throw error;
+    }
+
+    // Invalidate any previously unconsumed tokens for this user
+    await prisma.emailVerificationToken.updateMany({
+      where: { userId, used: false },
+      data: { used: true },
+    });
+
+    // Generate 32 bytes cryptographically random raw token
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes validity
+
+    await prisma.emailVerificationToken.create({
+      data: {
+        tokenHash,
+        userId,
+        used: false,
+        expiresAt,
+      },
+    });
+
+    return rawToken;
+  }
+
+  /**
+   * Registers a new user account with role selection, password hashing, and token issuance.
+   * Automatically initiates single-use email verification dispatch.
+   */
+  async register(input: RegisterInput): Promise<AuthResponse & { verificationToken?: string }> {
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -58,9 +102,9 @@ export class AuthService {
 
     const hashedPassword = await hashPassword(input.password);
 
-    // Initial status: ACTIVE for parents, students, businesses; PENDING verification for drivers/providers
+    // Initial status: ACTIVE for parents, students; PENDING administrator approval for drivers, providers, and businesses
     const initialStatus =
-      input.role === 'DRIVER' || input.role === 'TRANSPORT_PROVIDER'
+      input.role === 'DRIVER' || input.role === 'TRANSPORT_PROVIDER' || input.role === 'BUSINESS'
         ? 'PENDING'
         : 'ACTIVE';
 
@@ -73,6 +117,8 @@ export class AuthService {
         passwordHash: hashedPassword,
         role: input.role as any,
         status: initialStatus,
+        isEmailVerified: false,
+        emailVerifiedAt: null,
       },
     });
 
@@ -81,6 +127,7 @@ export class AuthService {
       email: user.email,
       role: user.role as any,
       status: user.status as any,
+      isEmailVerified: false,
     };
 
     const accessToken = generateAccessToken(jwtPayload);
@@ -98,6 +145,15 @@ export class AuthService {
       },
     });
 
+    // Generate single-use email verification token & dispatch email
+    let verificationToken: string | undefined;
+    try {
+      verificationToken = await this.generateEmailVerificationToken(user.id);
+      await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken);
+    } catch (err: any) {
+      console.error('[AuthService] Could not send verification email on registration:', err.message);
+    }
+
     return {
       user: sanitizeUser(user),
       tokens: {
@@ -105,6 +161,101 @@ export class AuthService {
         refreshToken,
         expiresIn: env.JWT_ACCESS_EXPIRES_IN,
       },
+      ...(env.NODE_ENV !== 'production' && verificationToken ? { verificationToken } : {}),
+    };
+  }
+
+  /**
+   * Consumes a single-use email verification token and marks user email as verified.
+   * Strictly isolates email verification from Fayda identity and administrator approval.
+   */
+  async verifyEmail(rawToken: string): Promise<{ message: string; user: UserSanitized }> {
+    if (!rawToken || typeof rawToken !== 'string') {
+      const error: AppError = new Error('Verification token is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    const tokenRecord = await prisma.emailVerificationToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+
+    if (!tokenRecord) {
+      const error: AppError = new Error('Invalid email verification token');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (tokenRecord.used) {
+      const error: AppError = new Error('Email verification token has already been used');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
+      const error: AppError = new Error('Email verification token has expired. Please request a new verification link.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Atomically consume token and verify email
+    const [, updatedUser] = await prisma.$transaction([
+      prisma.emailVerificationToken.update({
+        where: { id: tokenRecord.id },
+        data: { used: true },
+      }),
+      prisma.user.update({
+        where: { id: tokenRecord.userId },
+        data: {
+          isEmailVerified: true,
+          emailVerifiedAt: new Date(),
+        },
+      }),
+    ]);
+
+    return {
+      message: 'Email address verified successfully.',
+      user: sanitizeUser(updatedUser),
+    };
+  }
+
+  /**
+   * Dispatches a fresh email verification link with rate limiting.
+   */
+  async resendVerificationEmail(
+    identifier: string
+  ): Promise<{ message: string; verificationToken?: string }> {
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: identifier },
+          { email: identifier.toLowerCase().trim() },
+        ],
+      },
+    });
+
+    // Generic response if not found to prevent user enumeration
+    if (!user) {
+      return {
+        message: 'If an account exists with this email address, a verification link has been dispatched.',
+      };
+    }
+
+    if (user.isEmailVerified) {
+      return {
+        message: 'Email address is already verified.',
+      };
+    }
+
+    const rawToken = await this.generateEmailVerificationToken(user.id);
+    await emailService.sendVerificationEmail(user.email, user.firstName, rawToken);
+
+    return {
+      message: 'A fresh verification link has been sent to your email address.',
+      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken } : {}),
     };
   }
 

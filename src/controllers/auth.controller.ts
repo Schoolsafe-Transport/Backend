@@ -84,6 +84,39 @@ export class AuthController {
     }
   }
 
+  async verifyEmail(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { token } = req.body;
+      const result = await authService.verifyEmail(token);
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async resendVerification(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const identifier = req.body?.email || (req as any).user?.id || (req as any).user?.email;
+      if (!identifier) {
+        res.status(400).json({
+          success: false,
+          message: 'Email address or user identifier is required',
+        });
+        return;
+      }
+      const result = await authService.resendVerificationEmail(identifier);
+      res.status(200).json({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getMe(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const user = await authService.getProfile(req.user!.id);

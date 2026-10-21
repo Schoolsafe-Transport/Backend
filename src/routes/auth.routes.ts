@@ -11,6 +11,8 @@ import {
   resetPasswordSchema,
   changePasswordSchema,
   updateProfileSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
 } from '../schemas/auth.schema';
 
 const router = Router();
@@ -202,6 +204,59 @@ router.post('/forgot-password', sensitiveRateLimiter, validate(forgotPasswordSch
  */
 router.post('/reset-password', sensitiveRateLimiter, validate(resetPasswordSchema), (req: any, res: any, next: any) =>
   authController.resetPassword(req, res, next)
+);
+
+/**
+ * @openapi
+ * /auth/verify-email:
+ *   post:
+ *     summary: Verify account email address using secure single-use token
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Email verified successfully
+ *       400:
+ *         description: Invalid, used, or expired verification token
+ */
+router.post('/verify-email', sensitiveRateLimiter, validate(verifyEmailSchema), (req: any, res: any, next: any) =>
+  authController.verifyEmail(req, res, next)
+);
+
+/**
+ * @openapi
+ * /auth/resend-verification:
+ *   post:
+ *     summary: Request fresh email verification link with rate limiting
+ *     tags:
+ *       - Authentication
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Fresh verification link dispatched if account exists
+ *       429:
+ *         description: Rate limit exceeded (wait 60 seconds)
+ */
+router.post('/resend-verification', sensitiveRateLimiter, validate(resendVerificationSchema), (req: any, res: any, next: any) =>
+  authController.resendVerification(req, res, next)
 );
 
 /**
