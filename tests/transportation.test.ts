@@ -72,7 +72,7 @@ describe('Transportation Marketplace Test Suite', () => {
     // Mark Provider as Verified and ACTIVE in DB
     await prisma.user.update({
       where: { id: providerId },
-      data: { isVerified: true, status: 'ACTIVE' },
+      data: { isVerified: true, status: 'ACTIVE', isEmailVerified: true },
     });
 
     // 4. Create Other Provider
@@ -87,6 +87,11 @@ describe('Transportation Marketplace Test Suite', () => {
       });
     otherProviderToken = otherProviderRes.body.data.tokens.accessToken;
     otherProviderId = otherProviderRes.body.data.user.id;
+
+    await prisma.user.update({
+      where: { id: otherProviderId },
+      data: { isVerified: true, status: 'ACTIVE', isEmailVerified: true },
+    });
 
     // 5. Create Business User
     const businessRes = await request(app)
@@ -310,11 +315,11 @@ describe('Transportation Marketplace Test Suite', () => {
       // Mark parents as verified to unlock request capabilities
       await prisma.user.update({
         where: { id: parentId },
-        data: { isVerified: true },
+        data: { isVerified: true, isEmailVerified: true },
       });
       await prisma.user.update({
         where: { id: otherParentId },
-        data: { isVerified: true },
+        data: { isVerified: true, isEmailVerified: true },
       });
 
       const res = await request(app)

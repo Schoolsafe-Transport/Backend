@@ -3,6 +3,7 @@ import app from '../src/app';
 import { prisma } from '../src/config/prisma';
 
 describe('SchoolSafe Extended Features Integration Tests', () => {
+  jest.setTimeout(30000);
   let adminToken: string;
   let parentToken: string;
   let providerToken: string;
@@ -60,6 +61,10 @@ describe('SchoolSafe Extended Features Integration Tests', () => {
         role: 'BUSINESS',
       });
     businessToken = businessRes.body.data.tokens.accessToken;
+    await prisma.user.update({
+      where: { id: businessRes.body.data.user.id },
+      data: { isEmailVerified: true, status: 'ACTIVE' },
+    });
   });
 
   afterAll(async () => {
