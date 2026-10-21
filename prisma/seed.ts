@@ -8,6 +8,31 @@ async function main() {
 
   const providerPasswordHash = await bcrypt.hash('SafeDriverPassword123!', 12);
   const parentPasswordHash = await bcrypt.hash('SafePassword123!', 12);
+  const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+
+  // 0. System Administrator
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@schoolsafe.org' },
+    update: {
+      passwordHash: adminPasswordHash,
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      isEmailVerified: true,
+      emailVerifiedAt: new Date(),
+      isVerified: true,
+    },
+    create: {
+      email: 'admin@schoolsafe.org',
+      passwordHash: adminPasswordHash,
+      firstName: 'SchoolSafe',
+      lastName: 'Administrator',
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      isEmailVerified: true,
+      emailVerifiedAt: new Date(),
+      isVerified: true,
+    },
+  });
 
   // 1. Verified Transport Provider
   const provider = await prisma.user.upsert({
@@ -145,6 +170,7 @@ async function main() {
   }
 
   console.log('Seed completed successfully!');
+  console.log(`Admin: ${admin.firstName} ${admin.lastName} (admin@schoolsafe.org / AdminSafe123!)`);
   console.log(`Provider: ${provider.firstName} ${provider.lastName} (driver.samuel@schoolsafe.org / SafeDriverPassword123!)`);
   console.log(`Route: ${route.name} (Monthly: ETB ${route.monthlyPrice}, Available Seats: ${route.availableSeats})`);
   console.log(`Parent: ${parent.firstName} ${parent.lastName} (parent.abebe@schoolsafe.org / SafePassword123!)`);

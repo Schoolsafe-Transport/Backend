@@ -28,6 +28,10 @@ export interface UserSanitized {
   role: UserRole;
   status: UserStatus;
   isVerified: boolean;
+  faydaId?: string | null;
+  isEmailVerified: boolean;
+  emailVerifiedAt?: Date | null;
+  rejectionReason?: string | null;
   profilePhoto?: string | null;
   createdAt: Date;
   updatedAt: Date;

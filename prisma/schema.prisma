@@ -77,12 +77,17 @@ model User {
   role                UserRole             @default(PARENT)
   status              UserStatus           @default(ACTIVE)
   isVerified          Boolean              @default(false)
+  faydaId             String?
+  isEmailVerified     Boolean              @default(false)
+  emailVerifiedAt     DateTime?
+  rejectionReason     String?
   profilePhoto        String?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
-  refreshTokens       RefreshToken[]
-  passwordResetTokens PasswordResetToken[]
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
 
   // Marketplace relations
   students            Student[]            @relation("ParentStudents")
@@ -132,6 +137,20 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Secure Email Verification Token Model (Stores SHA-256 Hash of raw token)
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 // Student Model (Child of Parent)
