@@ -16,9 +16,19 @@ export class AdvertisingService {
       where: {
         status: 'ACTIVE',
         ...(placement ? { placement } : {}),
-        OR: [
-          { endDate: null },
-          { endDate: { gte: now } },
+        AND: [
+          {
+            OR: [
+              { startDate: null },
+              { startDate: { lte: now } },
+            ],
+          },
+          {
+            OR: [
+              { endDate: null },
+              { endDate: { gte: now } },
+            ],
+          },
         ],
       },
       select: {
@@ -62,6 +72,22 @@ export class AdvertisingService {
    * Business: Creates a new advertising campaign for promotion.
    */
   async createCampaign(businessId: string, input: CreateCampaignInput) {
+    const business = await prisma.user.findUnique({
+      where: { id: businessId },
+    });
+
+    if (!business) {
+      const error: AppError = new Error('Business account not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!business.isEmailVerified) {
+      const error: AppError = new Error('Email verification required before creating advertising campaigns');
+      error.statusCode = 403;
+      throw error;
+    }
+
     let startDate = new Date();
     let endDate: Date | null = null;
 

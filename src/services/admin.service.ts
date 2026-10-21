@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { sanitizeUser } from '../utils/security.util';
+import { emailService } from './email.service';
 
 export class AdminService {
   /**
@@ -87,6 +88,147 @@ export class AdminService {
       where: { id: userId },
       data: { status: status as any },
     });
+
+    return sanitizeUser(updated);
+  }
+
+  /**
+   * Retrieves provider, driver, and business registration applications with document and verification status.
+   */
+  async listApplications(query: { role?: string; status?: string; search?: string }) {
+    const where: any = {
+      role: { in: ['TRANSPORT_PROVIDER', 'DRIVER', 'BUSINESS'] },
+    };
+
+    if (query.role) {
+      where.role = query.role;
+    }
+
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    if (query.search) {
+      where.OR = [
+        { email: { contains: query.search, mode: 'insensitive' } },
+        { firstName: { contains: query.search, mode: 'insensitive' } },
+        { lastName: { contains: query.search, mode: 'insensitive' } },
+        { phone: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const applications = await prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        role: true,
+        status: true,
+        isEmailVerified: true,
+        emailVerifiedAt: true,
+        isVerified: true,
+        rejectionReason: true,
+        createdAt: true,
+        updatedAt: true,
+        vehicles: {
+          select: {
+            id: true,
+            make: true,
+            model: true,
+            year: true,
+            plateNumber: true,
+            capacity: true,
+            isVerified: true,
+            status: true,
+            documents: {
+              select: {
+                id: true,
+                documentType: true,
+                documentUrl: true,
+                isVerified: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return applications;
+  }
+
+  /**
+   * Administrative decision on an applicant (APPROVE, REJECT, SUSPEND).
+   * Enforces role hierarchy, requires rejection reasons, and sends decision notice.
+   */
+  async reviewApplication(
+    userId: string,
+    decision: 'APPROVE' | 'REJECT' | 'SUSPEND',
+    reason?: string,
+    requesterRole?: string,
+    requesterId?: string
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: AppError = new Error('Applicant not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (user.role === 'SUPER_ADMIN' && requesterRole !== 'SUPER_ADMIN') {
+      const error: AppError = new Error('Only a SUPER_ADMIN can modify a SUPER_ADMIN account');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (user.role === 'ADMIN' && requesterRole !== 'SUPER_ADMIN' && requesterId !== userId) {
+      const error: AppError = new Error('Only a SUPER_ADMIN can modify other ADMIN accounts');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    if (decision === 'REJECT' && (!reason || !reason.trim())) {
+      const error: AppError = new Error('A rejection reason must be provided when rejecting an application');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    let nextStatus: 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+    let rejectionReason: string | null = null;
+
+    if (decision === 'APPROVE') {
+      nextStatus = 'ACTIVE';
+      rejectionReason = null;
+    } else if (decision === 'REJECT') {
+      nextStatus = 'REJECTED';
+      rejectionReason = reason!.trim();
+    } else {
+      nextStatus = 'SUSPENDED';
+      rejectionReason = reason ? reason.trim() : null;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: nextStatus,
+        rejectionReason,
+      },
+    });
+
+    // Send decision notice via email
+    try {
+      await emailService.sendApprovalDecisionEmail(
+        updated.email,
+        updated.firstName,
+        decision === 'APPROVE' ? 'APPROVED' : decision === 'REJECT' ? 'REJECTED' : 'SUSPENDED',
+        rejectionReason || undefined
+      );
+    } catch (err: any) {
+      console.error('[AdminService] Could not send decision email:', err.message);
+    }
 
     return sanitizeUser(updated);
   }

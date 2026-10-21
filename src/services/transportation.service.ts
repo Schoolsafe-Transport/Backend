@@ -297,6 +297,14 @@ export class TransportationService {
       throw err;
     }
 
+    if (!parent.isEmailVerified) {
+      const err: any = new Error(
+        'Email verification required: Please verify your email address before requesting school transportation'
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+
     // 1. Ownership check: student must belong to the parent
     const student = await prisma.student.findUnique({
       where: { id: input.studentId },
@@ -735,6 +743,15 @@ export class TransportationService {
         const err: any = new Error('Forbidden: You can only accept requests for your own routes');
         err.statusCode = 403;
         throw err;
+      }
+
+      if (isProvider) {
+        const provider = await tx.user.findUnique({ where: { id: providerId } });
+        if (!provider || !provider.isEmailVerified || provider.status !== 'ACTIVE') {
+          const err: any = new Error('Provider account must have verified email and active administrator approval to accept requests');
+          err.statusCode = 403;
+          throw err;
+        }
       }
 
       if (request.status === 'ACCEPTED') {
@@ -1340,6 +1357,28 @@ export class TransportationService {
   }
 
   async createRoute(providerId: string, input: CreateRouteInput) {
+    const provider = await prisma.user.findUnique({
+      where: { id: providerId },
+    });
+
+    if (!provider) {
+      const err: any = new Error('Provider account not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (!provider.isEmailVerified) {
+      const err: any = new Error('Email verification required: Please verify your email before publishing routes');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (provider.status !== 'ACTIVE') {
+      const err: any = new Error('Account pending administrator approval: Your provider account must be approved by an administrator before publishing transportation routes');
+      err.statusCode = 403;
+      throw err;
+    }
+
     // Verify vehicle belongs to provider
     const vehicle = await prisma.vehicle.findFirst({
       where: { id: input.vehicleId, providerId },
@@ -1529,7 +1568,57 @@ export class TransportationService {
     return trip;
   }
 
-  async updateTripStatus(tripId: string, status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
+  async updateTripStatus(
+    tripId: string,
+    status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED',
+    actorId?: string,
+    actorRole?: string
+  ) {
+    const existingTrip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        driver: true,
+        vehicle: true,
+        route: true,
+      },
+    });
+
+    if (!existingTrip) {
+      const err: any = new Error('Trip not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (actorRole === 'DRIVER' && actorId && existingTrip.driverId !== actorId) {
+      const err: any = new Error('Forbidden: You can only update trips assigned to your driver account');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (actorRole === 'TRANSPORT_PROVIDER' && actorId && existingTrip.route.providerId !== actorId) {
+      const err: any = new Error('Forbidden: You can only update trips for your own routes');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (status === 'IN_PROGRESS') {
+      if (!existingTrip.driver.isEmailVerified) {
+        const err: any = new Error('Driver email must be verified before starting trips');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (existingTrip.driver.status !== 'ACTIVE') {
+        const err: any = new Error('Driver account must have active administrator approval before starting trips');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (existingTrip.vehicle.status !== 'ACTIVE') {
+        const err: any = new Error('Assigned vehicle is not active or authorized for operation');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
     const updateData: any = { status };
     if (status === 'IN_PROGRESS') {
       updateData.startTime = new Date();

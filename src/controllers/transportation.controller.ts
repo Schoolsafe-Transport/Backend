@@ -396,7 +396,12 @@ export class TransportationController {
   async updateTripStatus(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { status } = req.body;
-      const trip = await transportationService.updateTripStatus(req.params.id, status);
+      const trip = await transportationService.updateTripStatus(
+        req.params.id,
+        status,
+        req.user?.id,
+        req.user?.role
+      );
       res.json({
         success: true,
         message: `Trip status updated to ${status}`,

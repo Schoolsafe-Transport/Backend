@@ -45,6 +45,40 @@ export class AdminController {
     }
   }
 
+  async listApplications(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { role, status, search } = req.query as any;
+      const applications = await adminService.listApplications({ role, status, search });
+      res.status(200).json({
+        success: true,
+        data: applications,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reviewApplication(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const { decision, reason } = req.body;
+      const updated = await adminService.reviewApplication(
+        userId,
+        decision,
+        reason,
+        req.user?.role,
+        req.user?.id
+      );
+      res.status(200).json({
+        success: true,
+        message: `Application decision '${decision}' applied successfully`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getPlatformStats(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const stats = await adminService.getPlatformStats();

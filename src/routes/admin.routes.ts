@@ -1,12 +1,40 @@
 import { Router } from 'express';
 import { adminController } from '../controllers/admin.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
+import { validate } from '../middleware/validate';
+import { applicationDecisionSchema } from '../schemas/admin.schema';
 
 const router = Router();
 
 // Protect all admin endpoints to ADMIN and SUPER_ADMIN roles
 router.use(authenticate as any);
 router.use(authorize('ADMIN', 'SUPER_ADMIN') as any);
+
+/**
+ * @openapi
+ * /admin/applications:
+ *   get:
+ *     summary: "List provider, driver, and business registration applications"
+ *     tags:
+ *       - Administration
+ */
+router.get('/applications', (req: any, res: any, next: any) =>
+  adminController.listApplications(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/applications/{userId}/review:
+ *   post:
+ *     summary: "Approve, reject, or suspend a registration application"
+ *     tags:
+ *       - Administration
+ */
+router.post(
+  '/applications/:userId/review',
+  validate(applicationDecisionSchema),
+  (req: any, res: any, next: any) => adminController.reviewApplication(req, res, next)
+);
 
 /**
  * @openapi
