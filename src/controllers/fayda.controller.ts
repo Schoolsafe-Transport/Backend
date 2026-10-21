@@ -66,9 +66,9 @@ export class FaydaController {
     }
   }
 
-  async verifyByFin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  async initiateFin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { finNumber, otp } = req.body;
+      const { finNumber } = req.body;
       if (!finNumber) {
         res.status(400).json({
           success: false,
@@ -77,7 +77,29 @@ export class FaydaController {
         return;
       }
 
-      const result = await faydaService.verifyByFin(req.user!.id, finNumber, otp);
+      const result = await faydaService.initiateFinVerification(req.user!.id, finNumber);
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async verifyByFin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { finNumber, otp, transactionId } = req.body;
+      if (!finNumber) {
+        res.status(400).json({
+          success: false,
+          message: 'Fayda FIN (National ID Number) is required',
+        });
+        return;
+      }
+
+      const result = await faydaService.verifyByFin(req.user!.id, finNumber, otp, transactionId);
       res.status(200).json({
         success: true,
         message: 'Fayda National ID successfully validated and account verified',

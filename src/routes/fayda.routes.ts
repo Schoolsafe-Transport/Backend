@@ -50,6 +50,38 @@ router.get('/callback', (req: any, res: any, next: any) =>
 
 /**
  * @openapi
+ * /fayda/initiate-fin:
+ *   post:
+ *     summary: Initiate Fayda FIN identity verification and dispatch SMS OTP
+ *     tags:
+ *       - Fayda National ID
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - finNumber
+ *             properties:
+ *               finNumber:
+ *                 type: string
+ *                 example: "123456789012"
+ *     responses:
+ *       200:
+ *         description: Fayda OTP dispatched to citizen phone
+ */
+router.post(
+  '/initiate-fin',
+  authenticate as any,
+  sensitiveRateLimiter,
+  (req: any, res: any, next: any) => faydaController.initiateFin(req, res, next)
+);
+
+/**
+ * @openapi
  * /fayda/verify-fin:
  *   post:
  *     summary: Verify account using Fayda FIN (Ethiopian 12-digit National ID)
@@ -72,6 +104,9 @@ router.get('/callback', (req: any, res: any, next: any) =>
  *               otp:
  *                 type: string
  *                 example: "123456"
+ *               transactionId:
+ *                 type: string
+ *                 example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
  *     responses:
  *       200:
  *         description: Account successfully verified
