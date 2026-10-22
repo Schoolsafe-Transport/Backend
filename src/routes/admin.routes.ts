@@ -96,4 +96,28 @@ router.get('/safety-incidents', (req: any, res: any, next: any) =>
   adminController.resolveSafetyIncident(req, res, next)
 );
 
+/**
+ * @openapi
+ * /admin/payments:
+ *   get:
+ *     summary: "List all payments submitted for review or historical records"
+ *     tags:
+ *       - Administration
+ */
+router.get('/payments', (req: any, res: any, next: any) =>
+  adminController.listPayments(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/payments/{paymentId}/review:
+ *   patch:
+ *     summary: "Approve, reject, or request another receipt for a payment"
+ *     tags:
+ *       - Administration
+ */
+(router as any).patch('/payments/:paymentId/review', (req: any, res: any, next: any) =>
+  adminController.reviewPayment(req, res, next)
+);
+
 export default router;
