@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { transportationController } from '../controllers/transportation.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
+import { uploadReceiptMiddleware } from '../utils/receiptStorage.util';
 
 const router = Router();
 
@@ -60,6 +61,13 @@ router.delete(
   authenticate,
   authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
   transportationController.deleteStudent.bind(transportationController)
+);
+
+router.get(
+  '/students/:id/trip-status',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.getStudentTripStatus.bind(transportationController)
 );
 
 // 3. Transportation Requests
@@ -150,6 +158,46 @@ router.post(
   authenticate,
   authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
   transportationController.processPayment.bind(transportationController)
+);
+
+// Payment Receipt Evidence Upload
+router.post(
+  '/agreements/:id/payments/upload-receipt',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  uploadReceiptMiddleware.single('receipt'),
+  transportationController.uploadPaymentReceipt.bind(transportationController)
+);
+
+router.post(
+  '/agreements/:id/upload-receipt',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  uploadReceiptMiddleware.single('receipt'),
+  transportationController.uploadPaymentReceipt.bind(transportationController)
+);
+
+// Secure Receipt Retrieval (Authorized Parent, Provider, Admin only)
+router.get(
+  '/payments/:paymentId/receipt',
+  authenticate,
+  authorize('PARENT', 'TRANSPORT_PROVIDER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.getPaymentReceipt.bind(transportationController)
+);
+
+// 5.1 Student Transport QR Pass
+router.get(
+  '/agreements/:id/pass',
+  authenticate,
+  authorize('PARENT', 'TRANSPORT_PROVIDER', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.getStudentTransportPass.bind(transportationController)
+);
+
+router.post(
+  '/agreements/:id/pass/regenerate',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.regenerateStudentTransportPass.bind(transportationController)
 );
 
 // 7. Active Passengers Manifest for Providers
@@ -274,6 +322,13 @@ router.post(
   authenticate,
   authorize('TRANSPORT_PROVIDER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN'),
   transportationController.recordBoardingEvent.bind(transportationController)
+);
+
+router.post(
+  '/trips/:id/scan-pass',
+  authenticate,
+  authorize('TRANSPORT_PROVIDER', 'DRIVER', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.scanStudentPass.bind(transportationController)
 );
 
 router.post(
