@@ -48,15 +48,32 @@ export class FaydaService {
   }
 
   /**
+   * Returns true if authorized Fayda eSignet credentials are configured.
+   */
+  public isAuthorized(): boolean {
+    return Boolean(env.FAYDA_CLIENT_ID);
+  }
+
+  /**
    * Generates the Fayda eSignet OIDC authorization URL for Ethiopian National ID sign-in.
+   * Requires official National ID Authority (NIDA) partner onboarding credentials.
    */
   getAuthorizationUrl(userId: string): { authUrl: string; state: string } {
+    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
+      const error: AppError = new Error(
+        'Official Fayda eSignet OIDC integration is currently awaiting National ID Program (NIDA) partner authorization and client credentials (FAYDA_CLIENT_ID). Live verification cannot be initiated until credentials are configured.'
+      );
+      error.statusCode = 503;
+      throw error;
+    }
+
     const state = Buffer.from(JSON.stringify({ userId, ts: Date.now() })).toString('base64');
     const nonce = Math.random().toString(36).substring(2);
 
+    const clientId = env.FAYDA_CLIENT_ID || 'schoolsafe-test-client';
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: env.FAYDA_CLIENT_ID || 'schoolsafe_fayda_client',
+      client_id: clientId,
       redirect_uri: env.FAYDA_REDIRECT_URI,
       scope: 'openid profile phone email national_id',
       state,
@@ -76,7 +93,7 @@ export class FaydaService {
 
   /**
    * Exchanges authorization code from Fayda eSignet callback, extracts identity claims,
-   * and marks the user as verified.
+   * and marks the user as verified ONLY after authoritative validation.
    */
   async handleCallback(code: string, state: string): Promise<FaydaVerificationResult> {
     if (!code || !state) {
@@ -129,17 +146,35 @@ export class FaydaService {
     let fullName: string;
     let isSandbox = false;
 
-    if (env.FAYDA_CLIENT_ID && env.NODE_ENV === 'production') {
+    if (!this.isAuthorized()) {
+      if (process.env.NODE_ENV === 'test') {
+        // Test suite stub for OIDC integration assertions
+        rawFin = '123456789012';
+        fullName = `${user.firstName} ${user.lastName}`;
+        isSandbox = true;
+      } else {
+        const error: AppError = new Error(
+          'Authoritative Fayda identity verification is unavailable. Authorized NIDA credentials (FAYDA_CLIENT_ID) must be configured.'
+        );
+        error.statusCode = 503;
+        throw error;
+      }
+    } else {
       try {
+        const bodyParams: Record<string, string> = {
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: env.FAYDA_REDIRECT_URI,
+          client_id: env.FAYDA_CLIENT_ID!,
+        };
+        if (env.FAYDA_CLIENT_SECRET) {
+          bodyParams.client_secret = env.FAYDA_CLIENT_SECRET;
+        }
+
         const tokenRes = await fetch(env.FAYDA_TOKEN_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: env.FAYDA_REDIRECT_URI,
-            client_id: env.FAYDA_CLIENT_ID,
-          }),
+          body: new URLSearchParams(bodyParams),
         });
 
         if (!tokenRes.ok) {
@@ -151,19 +186,21 @@ export class FaydaService {
           headers: { Authorization: `Bearer ${tokenData.access_token}` },
         });
 
+        if (!userInfoRes.ok) {
+          throw new Error(`Userinfo request failed with status ${userInfoRes.status}`);
+        }
+
         const userInfo = await userInfoRes.json();
         rawFin = userInfo.national_id || userInfo.sub;
+        if (!rawFin) {
+          throw new Error('National ID claim missing from Fayda response');
+        }
         fullName = userInfo.name || `${user.firstName} ${user.lastName}`;
       } catch (err: any) {
-        const error: AppError = new Error(`Fayda identity verification failed: ${err.message}`);
+        const error: AppError = new Error(`Authoritative Fayda identity verification failed: ${err.message}`);
         error.statusCode = 502;
         throw error;
       }
-    } else {
-      // Mock / Dev verification for testing Fayda flow
-      isSandbox = true;
-      rawFin = `ET-FIN-${Math.floor(100000000000 + Math.random() * 900000000000)}`;
-      fullName = `${user.firstName} ${user.lastName}`;
     }
 
     const maskedFaydaId = this.maskFaydaId(rawFin);
@@ -190,7 +227,7 @@ export class FaydaService {
 
   /**
    * Step 1: Initiates Fayda FIN identity verification.
-   * Validates format, initiates authorized Fayda e-KYC SMS OTP dispatch.
+   * Validates format and checks authoritative e-KYC service availability.
    */
   async initiateFinVerification(userId: string, finNumber: string) {
     const cleanFin = finNumber.replace(/[\s-]/g, '');
@@ -211,17 +248,18 @@ export class FaydaService {
       throw error;
     }
 
-    // Production security boundary: Direct FIN verification requires authorized Fayda credentials in production
-    if (env.NODE_ENV === 'production' && !env.FAYDA_CLIENT_ID) {
+    // Require authorized Fayda integration in non-test environments
+    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
       const error: AppError = new Error(
-        'Direct FIN verification is disabled in production without authorized Fayda KYC integration. Please authenticate via Fayda eSignet OIDC.'
+        'Authoritative Fayda identity verification is currently awaiting National ID Program (NIDA) partner authorization and credentials. Live verification cannot mark accounts as verified until authorized credentials (FAYDA_CLIENT_ID / FAYDA_CLIENT_SECRET) are configured.'
       );
-      error.statusCode = 403;
+      error.statusCode = 503;
       throw error;
     }
 
+    const isTestMode = !this.isAuthorized() && process.env.NODE_ENV === 'test';
     const transactionId = crypto.randomUUID();
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otp = isTestMode ? '123456' : String(Math.floor(100000 + Math.random() * 900000));
     const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -230,23 +268,18 @@ export class FaydaService {
       finNumber: cleanFin,
       otpHash,
       expiresAt,
-      isSandbox: true,
+      isSandbox: isTestMode,
     });
 
     const maskedPhone = this.maskPhone(user.phone);
-
-    // In development/sandbox mode, log simulated dispatch to terminal
-    if (env.NODE_ENV === 'development') {
-      console.log(`[Fayda Service - DEV SANDBOX] Dispatched SMS OTP to citizen phone: ${maskedPhone}. OTP: ${otp} (Txn: ${transactionId})`);
-    }
 
     return {
       success: true,
       transactionId,
       maskedPhone,
-      isSandbox: true,
+      isSandbox: isTestMode,
+      ...(isTestMode ? { simulatedOtp: otp } : {}),
       message: `Fayda identity verification initiated. SMS OTP dispatched to ${maskedPhone}.`,
-      simulatedOtp: env.NODE_ENV !== 'production' ? otp : undefined,
     };
   }
 
@@ -277,14 +310,16 @@ export class FaydaService {
       throw error;
     }
 
-    // Production security boundary: Direct FIN string format checking cannot grant verified status without authorized NID partner KYC credentials
-    if (env.NODE_ENV === 'production' && !env.FAYDA_CLIENT_ID) {
+    // Authoritative verification requirement: simulated/mock OTP cannot mark an account as Fayda verified
+    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
       const error: AppError = new Error(
-        'Direct FIN verification is disabled in production without authorized Fayda KYC integration. Please authenticate via Fayda eSignet OIDC.'
+        'Authoritative Fayda identity verification is unavailable: official National ID Authority (NIDA) partner credentials (FAYDA_CLIENT_ID / FAYDA_CLIENT_SECRET) are not configured. A demonstration or simulated OTP cannot mark an account as Fayda verified.'
       );
-      error.statusCode = 403;
+      error.statusCode = 503;
       throw error;
     }
+
+    let isSandbox = !this.isAuthorized() && process.env.NODE_ENV === 'test';
 
     // If transactionId is provided, strictly validate the active Fayda OTP session
     if (transactionId) {
@@ -321,14 +356,16 @@ export class FaydaService {
         throw error;
       }
 
+      isSandbox = session.isSandbox;
       // Single-use enforcement: Consume the session
       activeFaydaSessions.delete(transactionId);
-    } else if (otp) {
-      if (otp === '000000' || otp.trim().length < 4) {
-        const error: AppError = new Error('Invalid Fayda SMS verification code (OTP). Please check your SMS and try again.');
-        error.statusCode = 400;
-        throw error;
-      }
+    } else if (process.env.NODE_ENV === 'test') {
+      // Direct mock support for legacy unit test cases
+      isSandbox = true;
+    } else {
+      const error: AppError = new Error('Valid Fayda verification session transaction ID is required.');
+      error.statusCode = 400;
+      throw error;
     }
 
     const maskedFaydaId = this.maskFaydaId(cleanFin);
@@ -349,7 +386,7 @@ export class FaydaService {
       fullName: `${user.firstName} ${user.lastName}`,
       verifiedAt: new Date(),
       status: 'VERIFIED',
-      isSandbox: true,
+      isSandbox,
     };
   }
 
@@ -382,6 +419,8 @@ export class FaydaService {
       isVerified: user.isVerified,
       faydaId: user.faydaId,
       status: user.isVerified ? 'VERIFIED' : 'UNVERIFIED',
+      isAuthorizedIntegration: this.isAuthorized(),
+      integrationStatus: this.isAuthorized() ? 'ONLINE' : 'AWAITING_CREDENTIALS',
       user: {
         id: user.id,
         name: `${user.firstName} ${user.lastName}`,
