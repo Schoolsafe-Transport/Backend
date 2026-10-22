@@ -68,7 +68,9 @@ export class AuthService {
    * Registers a new user account with role selection, password hashing, and token issuance.
    * Automatically initiates single-use email verification dispatch.
    */
-  async register(input: RegisterInput): Promise<AuthResponse & { verificationToken?: string }> {
+  async register(
+    input: RegisterInput
+  ): Promise<AuthResponse & { verificationToken?: string; emailDelivery?: { delivered: boolean; error?: string } }> {
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -147,11 +149,17 @@ export class AuthService {
 
     // Generate single-use email verification token & dispatch email
     let verificationToken: string | undefined;
+    let emailDelivery: { delivered: boolean; error?: string } = { delivered: false };
     try {
       verificationToken = await this.generateEmailVerificationToken(user.id);
-      await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken);
+      const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken);
+      emailDelivery = {
+        delivered: sendRes.delivered,
+        ...(sendRes.error ? { error: sendRes.error } : {}),
+      };
     } catch (err: any) {
       console.error('[AuthService] Could not send verification email on registration:', err.message);
+      emailDelivery = { delivered: false, error: err.message };
     }
 
     return {
@@ -161,6 +169,7 @@ export class AuthService {
         refreshToken,
         expiresIn: env.JWT_ACCESS_EXPIRES_IN,
       },
+      emailDelivery,
       ...(env.NODE_ENV !== 'production' && verificationToken ? { verificationToken } : {}),
     };
   }
@@ -227,7 +236,7 @@ export class AuthService {
    */
   async resendVerificationEmail(
     identifier: string
-  ): Promise<{ message: string; verificationToken?: string }> {
+  ): Promise<{ success: boolean; delivered: boolean; message: string; error?: string; verificationToken?: string; verificationUrl?: string }> {
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -240,22 +249,40 @@ export class AuthService {
     // Generic response if not found to prevent user enumeration
     if (!user) {
       return {
+        success: true,
+        delivered: false,
         message: 'If an account exists with this email address, a verification link has been dispatched.',
       };
     }
 
     if (user.isEmailVerified) {
       return {
+        success: true,
+        delivered: false,
         message: 'Email address is already verified.',
       };
     }
 
     const rawToken = await this.generateEmailVerificationToken(user.id);
-    await emailService.sendVerificationEmail(user.email, user.firstName, rawToken);
+    const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken);
+
+    if (!dispatchResult.delivered) {
+      return {
+        success: false,
+        delivered: false,
+        message: dispatchResult.error
+          ? `Could not deliver verification email: ${dispatchResult.error}`
+          : 'Verification link generated, but outbound email delivery failed. SMTP credentials must be configured on the server.',
+        error: dispatchResult.error || 'SMTP delivery unavailable',
+        ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, verificationUrl: dispatchResult.verificationUrl } : {}),
+      };
+    }
 
     return {
+      success: true,
+      delivered: true,
       message: 'A fresh verification link has been sent to your email address.',
-      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken } : {}),
+      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, verificationUrl: dispatchResult.verificationUrl } : {}),
     };
   }
 
