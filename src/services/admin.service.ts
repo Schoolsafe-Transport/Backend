@@ -354,6 +354,190 @@ export class AdminService {
       },
     });
   }
+
+  /**
+   * Retrieves payments submitted for review or ledger history.
+   */
+  async listPayments(query: { status?: string; search?: string; page?: number; limit?: number }) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    if (query.search) {
+      where.OR = [
+        { reference: { contains: query.search, mode: 'insensitive' } },
+        { payer: { firstName: { contains: query.search, mode: 'insensitive' } } },
+        { payer: { lastName: { contains: query.search, mode: 'insensitive' } } },
+        { payer: { email: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, payments] = await Promise.all([
+      prisma.payment.count({ where }),
+      prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          payer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+            },
+          },
+          receiver: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+            },
+          },
+          agreement: {
+            include: {
+              student: true,
+              route: true,
+              vehicle: true,
+            },
+          },
+          reviewedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      payments: payments.map((p: any) => ({
+        id: p.id,
+        agreementId: p.agreementId,
+        reference: p.reference,
+        amount: p.amount,
+        currency: p.currency,
+        status: p.status,
+        paymentMethod: p.paymentMethod,
+        receiptUrl: p.receiptUrl ? `/api/transportation/payments/${p.id}/receipt` : null,
+        hasReceipt: Boolean(p.receiptUrl),
+        receiptOriginalName: p.receiptOriginalName,
+        receiptMimeType: p.receiptMimeType,
+        receiptSize: p.receiptSize,
+        receiptUploadedAt: p.receiptUploadedAt,
+        rejectionReason: p.rejectionReason,
+        notes: p.notes,
+        paidAt: p.paidAt,
+        createdAt: p.createdAt,
+        reviewedAt: p.reviewedAt,
+        reviewedBy: p.reviewedBy,
+        parent: p.payer,
+        provider: p.receiver,
+        student: p.agreement?.student,
+        route: p.agreement?.route,
+        vehicle: p.agreement?.vehicle,
+      })),
+    };
+  }
+
+  /**
+   * Reviews a payment evidence submission (APPROVE, REJECT, or REQUEST_NEW_RECEIPT).
+   */
+  async reviewPayment(
+    paymentId: string,
+    adminId: string,
+    decision: 'APPROVE' | 'REJECT' | 'REQUEST_NEW_RECEIPT',
+    reason?: string
+  ) {
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        agreement: {
+          include: {
+            student: true,
+            route: true,
+          },
+        },
+        payer: true,
+        receiver: true,
+      },
+    });
+
+    if (!payment) {
+      const error: AppError = new Error('Payment record not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if ((decision === 'REJECT' || decision === 'REQUEST_NEW_RECEIPT') && (!reason || !reason.trim())) {
+      const error: AppError = new Error('A reason must be provided when rejecting payment evidence or requesting a new receipt');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const nextStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    const rejectionReason = decision === 'APPROVE' ? null : reason!.trim();
+    const paidAt = decision === 'APPROVE' ? new Date() : null;
+
+    const updated = await prisma.$transaction(async (tx: any) => {
+      const p = await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: nextStatus as any,
+          paidAt,
+          reviewedById: adminId,
+          reviewedAt: new Date(),
+          rejectionReason,
+        },
+      });
+
+      // Notify parent of review decision
+      await tx.notification.create({
+        data: {
+          userId: payment.payerId,
+          title: decision === 'APPROVE' ? 'Payment Approved' : 'Payment Receipt Rejected',
+          message: decision === 'APPROVE'
+            ? `Your payment of ETB ${payment.amount} for ${payment.agreement.student.firstName} (${payment.agreement.route.name}) has been verified and approved.`
+            : `Your payment receipt for ${payment.agreement.student.firstName} was rejected: ${rejectionReason}. Please upload valid payment evidence.`,
+          type: decision === 'APPROVE' ? 'PAYMENT_APPROVED' : 'PAYMENT_REJECTED',
+          entityId: payment.id,
+        },
+      });
+
+      // Notify provider of review decision
+      await tx.notification.create({
+        data: {
+          userId: payment.receiverId,
+          title: decision === 'APPROVE' ? 'Transit Fee Payment Verified' : 'Payment Evidence Rejected',
+          message: decision === 'APPROVE'
+            ? `Payment of ETB ${payment.amount} for student ${payment.agreement.student.firstName} has been officially verified by administrators.`
+            : `Submitted payment receipt for student ${payment.agreement.student.firstName} was rejected during administrator review.`,
+          type: decision === 'APPROVE' ? 'PAYMENT_VERIFIED' : 'PAYMENT_REJECTED',
+          entityId: payment.id,
+        },
+      });
+
+      return p;
+    });
+
+    return updated;
+  }
 }
 
 export const adminService = new AdminService();
