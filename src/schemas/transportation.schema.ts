@@ -119,12 +119,23 @@ export const createTripSchema = z.object({
 
 export const recordBoardingSchema = z.object({
   studentId: z.string().uuid(),
-  eventType: z.enum(['BOARDED', 'DROPPED_OFF']),
+  eventType: z.enum(['BOARDED', 'ARRIVED_AT_SCHOOL', 'BOARDED_FOR_RETURN', 'DROPPED_OFF']),
   scannedStop: z.string().optional(),
   notes: z.string().max(500).optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
 });
+
+export const scanPassSchema = z.object({
+  qrToken: z.string().min(10, { message: 'Valid QR token is required' }),
+  eventType: z.enum(['BOARDED', 'ARRIVED_AT_SCHOOL', 'BOARDED_FOR_RETURN', 'DROPPED_OFF']).default('BOARDED'),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  scannedStop: z.string().optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export type ScanPassInput = zInfer<typeof scanPassSchema>;
 
 export const createAuthorizedPickupSchema = z.object({
   studentId: z.string().uuid(),
