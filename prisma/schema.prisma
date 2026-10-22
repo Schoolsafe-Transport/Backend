@@ -59,8 +59,13 @@ enum AgreementStatus {
 
 // Payment Transaction Statuses
 enum PaymentStatus {
+  UNPAID
   PENDING
+  PENDING_REVIEW
+  APPROVED
   PAID
+  REJECTED
+  REFUND_REQUIRED
   FAILED
   REFUNDED
   CANCELLED
@@ -100,6 +105,7 @@ model User {
   providerAgreements  TransportationAgreement[] @relation("ProviderAgreements")
   payerPayments       Payment[]            @relation("PayerPayments")
   receiverPayments    Payment[]            @relation("ReceiverPayments")
+  reviewedPayments    Payment[]            @relation("AdminPaymentReviews")
   notifications       Notification[]       @relation("UserNotifications")
   ratingsGiven        Rating[]             @relation("ParentRatings")
   ratingsReceived     Rating[]             @relation("ProviderRatings")
@@ -175,6 +181,7 @@ model Student {
   authorizedPickups   AuthorizedPickupPerson[]
   tripPassengers      TripPassenger[]
   boardingEvents      BoardingEvent[]
+  transportPasses     StudentTransportPass[]
 
   @@index([parentId])
   @@map("students")
@@ -337,6 +344,7 @@ model TransportationAgreement {
   updatedAt      DateTime              @updatedAt
 
   payments       Payment[]
+  transportPass  StudentTransportPass?
 
   @@index([parentId])
   @@index([providerId])
@@ -348,25 +356,36 @@ model TransportationAgreement {
 
 // Payment Ledger Record
 model Payment {
-  id            String                  @id @default(uuid())
-  agreementId   String
-  agreement     TransportationAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  payerId       String
-  payer         User                    @relation("PayerPayments", fields: [payerId], references: [id], onDelete: Cascade)
-  receiverId    String
-  receiver      User                    @relation("ReceiverPayments", fields: [receiverId], references: [id], onDelete: Cascade)
-  amount        Float
-  currency      String                  @default("ETB")
-  status        PaymentStatus           @default(PENDING)
-  paymentMethod String                  @default("SIMULATED_TRANSFER")
-  reference     String                  @unique
-  paidAt        DateTime?
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
+  id                  String                  @id @default(uuid())
+  agreementId         String
+  agreement           TransportationAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  payerId             String
+  payer               User                    @relation("PayerPayments", fields: [payerId], references: [id], onDelete: Cascade)
+  receiverId          String
+  receiver            User                    @relation("ReceiverPayments", fields: [receiverId], references: [id], onDelete: Cascade)
+  amount              Float
+  currency            String                  @default("ETB")
+  status              PaymentStatus           @default(PENDING)
+  paymentMethod       String                  @default("MANUAL_TRANSFER")
+  reference           String                  @unique
+  receiptUrl          String?
+  receiptOriginalName String?
+  receiptMimeType     String?
+  receiptSize         Int?
+  receiptUploadedAt   DateTime?
+  reviewedById        String?
+  reviewedBy          User?                   @relation("AdminPaymentReviews", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt          DateTime?
+  rejectionReason     String?
+  notes               String?
+  paidAt              DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
 
   @@index([agreementId])
   @@index([payerId])
   @@index([receiverId])
+  @@index([reviewedById])
   @@map("payments")
 }
 
@@ -416,13 +435,24 @@ enum TripStatus {
 enum PassengerTripStatus {
   SCHEDULED
   BOARDED
+  ARRIVED_AT_SCHOOL
+  BOARDED_FOR_RETURN
   DROPPED_OFF
   ABSENT
 }
 
 enum BoardingEventType {
   BOARDED
+  ARRIVED_AT_SCHOOL
+  BOARDED_FOR_RETURN
   DROPPED_OFF
+}
+
+enum PassStatus {
+  ACTIVE
+  INACTIVE
+  REVOKED
+  EXPIRED
 }
 
 model Trip {
@@ -503,6 +533,31 @@ model BoardingEvent {
   @@index([tripId])
   @@index([studentId])
   @@map("boarding_events")
+}
+
+// Student Digital/Printable Transport QR Pass
+model StudentTransportPass {
+  id             String                  @id @default(uuid())
+  studentId      String
+  student        Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  agreementId    String                  @unique
+  agreement      TransportationAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  passCode       String                  @unique
+  tokenHash      String                  @unique
+  status         PassStatus              @default(ACTIVE)
+  qrDataUrl      String?                 @db.Text
+  encryptedToken String?                 @db.Text
+  issuedAt       DateTime                @default(now())
+  expiresAt      DateTime?
+  lastScannedAt  DateTime?
+  scanCount      Int                     @default(0)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  @@index([studentId])
+  @@index([tokenHash])
+  @@index([passCode])
+  @@map("student_transport_passes")
 }
 
 // ==========================================
