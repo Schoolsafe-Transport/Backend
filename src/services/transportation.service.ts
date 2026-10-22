@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { emitToUser, emitToTrip } from '../socket';
+import { getReceiptFilePath } from '../utils/receiptStorage.util';
 import {
   TransportationSearchQuery,
   CreateTransportationRequestInput,
@@ -17,9 +18,18 @@ import {
   UpdateRouteInput,
   CreateTripInput,
   RecordBoardingInput,
+  ScanPassInput,
   CreateAuthorizedPickupInput,
   CreateSafetyIncidentInput,
 } from '../schemas/transportation.schema';
+import {
+  generateOpaquePassToken,
+  hashPassToken,
+  generatePassCode,
+  encryptPassToken,
+  decryptPassToken,
+  generateQrDataUrl,
+} from '../utils/qrPass.util';
 
 export class TransportationService {
   /**
@@ -35,16 +45,15 @@ export class TransportationService {
       },
       provider: {
         status: 'ACTIVE',
+        isVerified: true,
       },
       vehicle: {
         status: 'ACTIVE',
+        isVerified: true,
       },
     };
 
-    if (query.verified === true) {
-      where.provider.isVerified = true;
-      where.vehicle.isVerified = true;
-    } else if (query.verified === false) {
+    if (query.verified === false) {
       where.provider.isVerified = false;
     }
 
@@ -989,6 +998,14 @@ export class TransportationService {
         },
       });
 
+      // 4. Revoke active student transport pass
+      await tx.studentTransportPass.updateMany({
+        where: { agreementId },
+        data: {
+          status: 'REVOKED',
+        },
+      });
+
       // 4. Notify counterparty
       const recipientId = isParent ? agreement.providerId : agreement.parentId;
       const actorLabel = isParent ? 'Parent' : 'Transport Provider';
@@ -1102,6 +1119,166 @@ export class TransportationService {
     });
 
     return updatedPayment;
+  }
+
+  /**
+   * Upload manual payment receipt evidence for an agreement.
+   * File is stored in private storage and status set to PENDING_REVIEW.
+   * Uploading a receipt is evidence, not automatic payment confirmation.
+   */
+  async uploadPaymentReceipt(
+    agreementId: string,
+    parentId: string,
+    file: Express.Multer.File,
+    notes?: string
+  ) {
+    if (!file) {
+      const err: any = new Error('Payment receipt file is required (JPEG, PNG, or PDF up to 5MB)');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const agreement = await prisma.transportationAgreement.findUnique({
+      where: { id: agreementId },
+      include: {
+        provider: true,
+        student: true,
+        route: true,
+      },
+    });
+
+    if (!agreement) {
+      const err: any = new Error('Transportation agreement not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (agreement.parentId !== parentId) {
+      const err: any = new Error('Forbidden: You can only upload receipts for your own agreements');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Find pending, unpaid, rejected or review payment for this agreement
+    let payment = await prisma.payment.findFirst({
+      where: {
+        agreementId,
+        status: { in: ['PENDING', 'UNPAID', 'PENDING_REVIEW', 'REJECTED'] as any },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const updatedPayment = await prisma.$transaction(async (tx: any) => {
+      if (payment) {
+        payment = await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: 'PENDING_REVIEW',
+            paymentMethod: 'MANUAL_TRANSFER',
+            receiptUrl: file.filename,
+            receiptOriginalName: file.originalname,
+            receiptMimeType: file.mimetype,
+            receiptSize: file.size,
+            receiptUploadedAt: new Date(),
+            rejectionReason: null, // Clear any past rejection reason on new upload
+            notes: notes || null,
+          },
+        });
+      } else {
+        const reference = `PAY-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+        payment = await tx.payment.create({
+          data: {
+            agreementId,
+            payerId: parentId,
+            receiverId: agreement.providerId,
+            amount: agreement.monthlyPrice,
+            currency: agreement.currency || 'ETB',
+            status: 'PENDING_REVIEW',
+            paymentMethod: 'MANUAL_TRANSFER',
+            reference,
+            receiptUrl: file.filename,
+            receiptOriginalName: file.originalname,
+            receiptMimeType: file.mimetype,
+            receiptSize: file.size,
+            receiptUploadedAt: new Date(),
+            notes: notes || null,
+          },
+        });
+      }
+
+      // Notify provider that evidence has been submitted
+      await tx.notification.create({
+        data: {
+          userId: agreement.providerId,
+          title: 'Payment Evidence Submitted',
+          message: `Payment receipt uploaded for ${agreement.student.firstName} (${agreement.route.name}). Status: Pending administrator review.`,
+          type: 'PAYMENT_RECEIPT_SUBMITTED',
+          entityId: payment.id,
+        },
+      });
+
+      return payment;
+    });
+
+    emitToUser(agreement.providerId, 'transportation:receipt_uploaded', {
+      agreementId,
+      amount: agreement.monthlyPrice,
+      paymentId: updatedPayment.id,
+    });
+
+    return updatedPayment;
+  }
+
+  /**
+   * Retrieves securely stored payment receipt file for authorized actors.
+   * Access is strictly restricted to:
+   * 1. The paying parent
+   * 2. The assigned route transport provider
+   * 3. SchoolSafe administrators
+   */
+  async getPaymentReceipt(paymentId: string, requesterId: string, requesterRole: string) {
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        agreement: {
+          include: {
+            route: true,
+            provider: true,
+            student: true,
+          },
+        },
+      },
+    });
+
+    if (!payment) {
+      const err: any = new Error('Payment record not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (!payment.receiptUrl) {
+      const err: any = new Error('No receipt has been uploaded for this payment record');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = requesterRole === 'ADMIN' || requesterRole === 'SUPER_ADMIN';
+    const isPayer = payment.payerId === requesterId;
+    const isProvider = payment.receiverId === requesterId || payment.agreement.providerId === requesterId;
+
+    if (!isAdmin && !isPayer && !isProvider) {
+      const err: any = new Error('Forbidden: You are not authorized to view this payment receipt evidence');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const filePath = getReceiptFilePath(payment.receiptUrl);
+    return {
+      filePath,
+      mimeType: payment.receiptMimeType || 'image/jpeg',
+      originalName: payment.receiptOriginalName || 'receipt.jpg',
+      payment,
+    };
   }
 
   /**
@@ -2087,6 +2264,654 @@ export class TransportationService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * TASK 1 & 2: Generate or retrieve a secure Student Transport Pass.
+   * Only active, verified bookings with eligible provider and vehicle can generate an ACTIVE pass.
+   * Parents can only access passes for their own children.
+   */
+  async getOrCreateStudentTransportPass(agreementId: string, userId: string, role: string) {
+    const agreement = await prisma.transportationAgreement.findUnique({
+      where: { id: agreementId },
+      include: {
+        student: true,
+        route: {
+          include: {
+            stops: true,
+          },
+        },
+        vehicle: true,
+        provider: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            status: true,
+            isVerified: true,
+            profilePhoto: true,
+          },
+        },
+        transportPass: true,
+      },
+    });
+
+    if (!agreement) {
+      const err: any = new Error('Transportation agreement not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const isParent = agreement.parentId === userId;
+    const isProvider = agreement.providerId === userId;
+
+    if (!isAdmin && !isParent && !isProvider) {
+      const err: any = new Error('Forbidden: You can only view transport passes for your own children or assigned agreements');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Task 1: Check active booking status and provider/vehicle eligibility
+    if (agreement.status !== 'ACTIVE') {
+      const err: any = new Error('Cannot generate transport pass: Booking is not active or has been cancelled. An accepted, active transportation booking is required.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (agreement.provider.status !== 'ACTIVE' || !agreement.provider.isVerified) {
+      const err: any = new Error('Cannot generate transport pass: Assigned transport provider is not active or verified.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (agreement.vehicle.status !== 'ACTIVE' || !agreement.vehicle.isVerified) {
+      const err: any = new Error('Cannot generate transport pass: Assigned vehicle is not active or verified.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    let pass = agreement.transportPass;
+    let rawToken: string = '';
+    let qrDataUrl: string = pass?.qrDataUrl || '';
+
+    if (pass && pass.encryptedToken) {
+      rawToken = decryptPassToken(pass.encryptedToken);
+    }
+
+    // If pass doesn't exist or token was rotated/missing, generate cryptographically secure token
+    if (!pass || !rawToken || !qrDataUrl) {
+      rawToken = generateOpaquePassToken();
+      const tokenHash = hashPassToken(rawToken);
+      const encryptedToken = encryptPassToken(rawToken);
+      const passCode = pass?.passCode || generatePassCode();
+      qrDataUrl = await generateQrDataUrl(rawToken);
+
+      if (!pass) {
+        pass = await prisma.studentTransportPass.create({
+          data: {
+            studentId: agreement.studentId,
+            agreementId: agreement.id,
+            passCode,
+            tokenHash,
+            status: 'ACTIVE',
+            encryptedToken,
+            qrDataUrl,
+            issuedAt: new Date(),
+          },
+        });
+      } else {
+        pass = await prisma.studentTransportPass.update({
+          where: { id: pass.id },
+          data: {
+            tokenHash,
+            encryptedToken,
+            qrDataUrl,
+            status: 'ACTIVE',
+            updatedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    // Match stop times if available
+    const stop = agreement.route.stops?.find((s: any) => s.name === agreement.pickupStopName);
+
+    return {
+      id: pass.id,
+      passCode: pass.passCode,
+      status: pass.status,
+      issuedAt: pass.issuedAt,
+      lastScannedAt: pass.lastScannedAt,
+      scanCount: pass.scanCount,
+      qrDataUrl,
+      qrToken: rawToken,
+      student: {
+        id: agreement.student.id,
+        firstName: agreement.student.firstName,
+        lastName: agreement.student.lastName,
+        grade: agreement.student.grade,
+        schoolName: agreement.student.schoolName,
+        schoolBranch: agreement.student.schoolBranch,
+        emergencyPhone: agreement.student.emergencyPhone,
+      },
+      school: {
+        name: agreement.student.schoolName,
+        branch: agreement.student.schoolBranch || agreement.route.schoolBranch || 'Main Campus',
+      },
+      provider: {
+        id: agreement.provider.id,
+        name: `${agreement.provider.firstName} ${agreement.provider.lastName}`,
+        phone: agreement.provider.phone,
+        isVerified: agreement.provider.isVerified,
+      },
+      vehicle: {
+        id: agreement.vehicle.id,
+        make: agreement.vehicle.make,
+        model: agreement.vehicle.model,
+        plateNumber: agreement.vehicle.plateNumber,
+      },
+      route: {
+        id: agreement.route.id,
+        name: agreement.route.name,
+        origin: agreement.route.origin,
+        destinationSchool: agreement.route.destinationSchool,
+        pickupStopName: agreement.pickupStopName,
+        pickupTimeMorning: stop?.pickupTimeMorning || agreement.route.departureTimeMorning || '07:30 AM',
+        dropoffTimeAfternoon: stop?.dropoffTimeAfternoon || agreement.route.departureTimeAfternoon || '03:30 PM',
+      },
+      agreement: {
+        id: agreement.id,
+        status: agreement.status,
+        monthlyPrice: agreement.monthlyPrice,
+        currency: agreement.currency,
+      },
+      branding: {
+        appName: 'SchoolSafe',
+        systemName: 'Student Transport SafePass',
+        tagline: 'Verified Identity & Real-time Boarding Network',
+      },
+    };
+  }
+
+  /**
+   * Regenerate pass token for security (e.g. if student pass is lost).
+   */
+  async regenerateStudentTransportPass(agreementId: string, userId: string, role: string) {
+    const agreement = await prisma.transportationAgreement.findUnique({
+      where: { id: agreementId },
+    });
+
+    if (!agreement) {
+      const err: any = new Error('Transportation agreement not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const isParent = agreement.parentId === userId;
+
+    if (!isAdmin && !isParent) {
+      const err: any = new Error('Forbidden: You can only regenerate passes for your own children');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (agreement.status !== 'ACTIVE') {
+      const err: any = new Error('Cannot regenerate pass: Agreement is no longer active');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Force rotation of token
+    const rawToken = generateOpaquePassToken();
+    const tokenHash = hashPassToken(rawToken);
+    const encryptedToken = encryptPassToken(rawToken);
+    const passCode = generatePassCode();
+    const qrDataUrl = await generateQrDataUrl(rawToken);
+
+    await prisma.studentTransportPass.upsert({
+      where: { agreementId: agreement.id },
+      create: {
+        studentId: agreement.studentId,
+        agreementId: agreement.id,
+        passCode,
+        tokenHash,
+        status: 'ACTIVE',
+        encryptedToken,
+        qrDataUrl,
+        issuedAt: new Date(),
+      },
+      update: {
+        passCode,
+        tokenHash,
+        encryptedToken,
+        qrDataUrl,
+        status: 'ACTIVE',
+        updatedAt: new Date(),
+      },
+    });
+
+    return this.getOrCreateStudentTransportPass(agreementId, userId, role);
+  }
+
+  /**
+   * TASK 4, 5 & 7: Scan student QR pass from driver / provider app.
+   * Strictly validates role, vehicle & trip assignment, prevents duplicates on same trip,
+   * records authoritative boarding/arrival event, and emits real-time updates.
+   */
+  async scanStudentPass(
+    tripId: string,
+    userId: string,
+    userRole: string,
+    input: ScanPassInput
+  ) {
+    // 1. Hash the incoming opaque token
+    const tokenHash = hashPassToken(input.qrToken);
+
+    // 2. Look up the pass by tokenHash
+    const pass = await prisma.studentTransportPass.findUnique({
+      where: { tokenHash },
+      include: {
+        student: true,
+        agreement: {
+          include: {
+            route: true,
+            vehicle: true,
+            provider: true,
+          },
+        },
+      },
+    });
+
+    if (!pass) {
+      const err: any = new Error('Invalid or unrecognized student transport pass. QR token could not be verified.');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // 3. Validate pass and underlying agreement status
+    if (pass.status !== 'ACTIVE') {
+      const err: any = new Error(`Transport pass is ${pass.status.toLowerCase()} and cannot authorize boarding.`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (pass.agreement.status !== 'ACTIVE') {
+      const err: any = new Error(`Cannot authorize boarding: Transportation booking is ${pass.agreement.status.toLowerCase()}.`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (pass.agreement.provider.status !== 'ACTIVE' || !pass.agreement.provider.isVerified) {
+      const err: any = new Error('Cannot authorize boarding: Provider account is not active or verified.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (pass.agreement.vehicle.status !== 'ACTIVE' || !pass.agreement.vehicle.isVerified) {
+      const err: any = new Error('Cannot authorize boarding: Assigned vehicle is not active or verified.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 4. Validate Trip exists and is active
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        driver: true,
+        vehicle: true,
+        route: true,
+        passengers: true,
+      },
+    });
+
+    if (!trip) {
+      const err: any = new Error('Trip not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (trip.status === 'CANCELLED' || trip.status === 'COMPLETED') {
+      const err: any = new Error(`Cannot record events on a trip with status ${trip.status}`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 5. TASK 7: Validate user assignment to this trip
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isAssignedDriver = trip.driverId === userId;
+    const isVehicleOwner = trip.vehicle?.providerId === userId;
+    const isRouteProvider = trip.route?.providerId === userId;
+
+    if (!isAdmin && !isAssignedDriver && !isVehicleOwner && !isRouteProvider) {
+      const err: any = new Error('Access denied: You are not assigned to drive or operate this trip');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // 6. Verify vehicle/route match with the student's booking
+    const vehicleMatches = trip.vehicleId === pass.agreement.vehicleId;
+    const routeMatches = trip.routeId === pass.agreement.routeId;
+
+    if (!vehicleMatches && !routeMatches) {
+      const err: any = new Error('Student is not assigned to this vehicle or route');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 7. Ensure student is listed on this trip passenger manifest
+    let passenger = await prisma.tripPassenger.findUnique({
+      where: {
+        tripId_studentId: {
+          tripId,
+          studentId: pass.studentId,
+        },
+      },
+    });
+
+    if (!passenger) {
+      passenger = await prisma.tripPassenger.create({
+        data: {
+          tripId,
+          studentId: pass.studentId,
+          pickupStopName: pass.agreement.pickupStopName,
+          status: 'SCHEDULED',
+        },
+      });
+    }
+
+    // 8. TASK 5: Enforce state transitions and prevent duplicate scans on this trip
+    const existingEventsForTrip = await prisma.boardingEvent.findMany({
+      where: {
+        tripId,
+        studentId: pass.studentId,
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    const alreadyHasThisEvent = existingEventsForTrip.some((e: any) => e.eventType === input.eventType);
+    if (alreadyHasThisEvent) {
+      const err: any = new Error(`Duplicate scan rejected: Event '${input.eventType}' has already been recorded for this student on this trip.`);
+      err.statusCode = 409;
+      throw err;
+    }
+
+    // State transition validations
+    if (input.eventType === 'ARRIVED_AT_SCHOOL') {
+      const hasBoarded = existingEventsForTrip.some((e: any) => e.eventType === 'BOARDED');
+      if (!hasBoarded) {
+        const err: any = new Error("Invalid state transition: Student must be marked as 'BOARDED' before recording 'ARRIVED_AT_SCHOOL'.");
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    if (input.eventType === 'DROPPED_OFF') {
+      const hasBoarded = existingEventsForTrip.some(
+        (e: any) => e.eventType === 'BOARDED' || e.eventType === 'BOARDED_FOR_RETURN'
+      );
+      if (!hasBoarded) {
+        const err: any = new Error("Invalid state transition: Student must be boarded before recording 'DROPPED_OFF'.");
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // 9. Record authoritative event with server timestamp
+    const authoritativeTimestamp = new Date();
+    const event = await prisma.boardingEvent.create({
+      data: {
+        tripId,
+        studentId: pass.studentId,
+        eventType: input.eventType,
+        timestamp: authoritativeTimestamp,
+        scannedStop: input.scannedStop || pass.agreement.pickupStopName || null,
+        latitude: input.latitude || null,
+        longitude: input.longitude || null,
+        verifiedByName: `${trip.driver?.firstName || 'Assigned'} ${trip.driver?.lastName || 'Driver'}`,
+        notes: input.notes || 'Scanned via driver QR pass reader',
+      },
+    });
+
+    // 10. Update manifest passenger status
+    let updatedPassengerStatus: any = 'BOARDED';
+    if (input.eventType === 'ARRIVED_AT_SCHOOL') updatedPassengerStatus = 'ARRIVED_AT_SCHOOL';
+    else if (input.eventType === 'BOARDED_FOR_RETURN') updatedPassengerStatus = 'BOARDED_FOR_RETURN';
+    else if (input.eventType === 'DROPPED_OFF') updatedPassengerStatus = 'DROPPED_OFF';
+
+    await prisma.tripPassenger.update({
+      where: { id: passenger.id },
+      data: {
+        status: updatedPassengerStatus,
+        ...(input.eventType === 'BOARDED' || input.eventType === 'BOARDED_FOR_RETURN'
+          ? { boardedAt: authoritativeTimestamp }
+          : {}),
+        ...(input.eventType === 'DROPPED_OFF' || input.eventType === 'ARRIVED_AT_SCHOOL'
+          ? { droppedOffAt: authoritativeTimestamp }
+          : {}),
+      },
+    });
+
+    // 11. Update pass metadata (does NOT permanently invalidate pass; supports future trips)
+    await prisma.studentTransportPass.update({
+      where: { id: pass.id },
+      data: {
+        lastScannedAt: authoritativeTimestamp,
+        scanCount: { increment: 1 },
+      },
+    });
+
+    // 12. Friendly labels for notification
+    const eventLabels: Record<string, string> = {
+      BOARDED: 'has safely boarded the vehicle',
+      ARRIVED_AT_SCHOOL: 'has safely arrived at school',
+      BOARDED_FOR_RETURN: 'has boarded the vehicle for the return journey',
+      DROPPED_OFF: 'has safely arrived and been dropped off at the stop',
+    };
+    const actionText = eventLabels[input.eventType] || `recorded event ${input.eventType}`;
+
+    // Notification to parent
+    await prisma.notification.create({
+      data: {
+        userId: pass.student.parentId,
+        title: `SafePass Update: ${pass.student.firstName} ${pass.student.lastName}`,
+        message: `${pass.student.firstName} ${actionText} (${trip.route?.name || 'Assigned Route'}).`,
+        type: `PASS_${input.eventType}`,
+        entityId: tripId,
+      },
+    });
+
+    // Real-time socket emissions
+    emitToUser(pass.student.parentId, 'student:boarding_event', {
+      studentId: pass.student.id,
+      studentName: `${pass.student.firstName} ${pass.student.lastName}`,
+      eventType: input.eventType,
+      tripId,
+      scannedStop: input.scannedStop || pass.agreement.pickupStopName,
+      timestamp: authoritativeTimestamp.toISOString(),
+    });
+
+    emitToTrip(tripId, 'trip:passenger_update', {
+      tripId,
+      studentId: pass.student.id,
+      status: updatedPassengerStatus,
+      eventType: input.eventType,
+      timestamp: authoritativeTimestamp.toISOString(),
+    });
+
+    // 13. TASK 7: Return minimum required student info to driver scanner
+    return {
+      success: true,
+      message: `Verified: ${pass.student.firstName} ${pass.student.lastName.charAt(0)}. ${actionText}.`,
+      event: {
+        id: event.id,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+        tripId,
+        scannedStop: event.scannedStop,
+      },
+      student: {
+        id: pass.student.id,
+        firstName: pass.student.firstName,
+        lastName: pass.student.lastName,
+        schoolName: pass.student.schoolName,
+        pickupStopName: pass.agreement.pickupStopName,
+      },
+      passengerStatus: updatedPassengerStatus,
+    };
+  }
+
+  /**
+   * TASK 6: Get latest trip status and safe travel journey for parent dashboard.
+   */
+  async getStudentTripStatus(studentId: string, userId: string, role: string) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      include: {
+        agreements: {
+          where: { status: 'ACTIVE' },
+          include: {
+            route: true,
+            vehicle: true,
+            provider: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+                profilePhoto: true,
+              },
+            },
+            transportPass: {
+              select: {
+                id: true,
+                passCode: true,
+                status: true,
+              },
+            },
+          },
+          take: 1,
+        },
+      },
+    });
+
+    if (!student) {
+      const err: any = new Error('Student not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const isParent = student.parentId === userId;
+
+    if (!isAdmin && !isParent) {
+      const err: any = new Error('Forbidden: You can only view trip status for your own child');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const activeAgreement = student.agreements[0] || null;
+
+    // Fetch latest boarding event
+    const latestEvent = await prisma.boardingEvent.findFirst({
+      where: { studentId },
+      include: {
+        trip: {
+          include: {
+            route: true,
+            vehicle: true,
+            driver: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    // Human readable status mapping
+    let statusLabel = 'Waiting for Pickup';
+    let statusBadgeColor = 'neutral';
+    let detailMessage = 'Vehicle scheduled for regular pickup route.';
+
+    if (latestEvent) {
+      const isToday =
+        new Date(latestEvent.timestamp).toDateString() === new Date().toDateString();
+
+      if (isToday) {
+        switch (latestEvent.eventType) {
+          case 'BOARDED':
+            statusLabel = 'Student Boarded';
+            statusBadgeColor = 'info';
+            detailMessage = `Boarded bus at ${latestEvent.scannedStop || 'scheduled stop'}. Transit in progress.`;
+            break;
+          case 'ARRIVED_AT_SCHOOL':
+            statusLabel = 'Arrived at School';
+            statusBadgeColor = 'success';
+            detailMessage = `Safely arrived at ${student.schoolName}.`;
+            break;
+          case 'BOARDED_FOR_RETURN':
+            statusLabel = 'Return Journey Started';
+            statusBadgeColor = 'info';
+            detailMessage = 'Boarded bus for afternoon homebound transit.';
+            break;
+          case 'DROPPED_OFF':
+            statusLabel = 'Dropped Off';
+            statusBadgeColor = 'success';
+            detailMessage = `Safely dropped off at ${latestEvent.scannedStop || 'designated stop'}.`;
+            break;
+        }
+      }
+    }
+
+    return {
+      student: {
+        id: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        schoolName: student.schoolName,
+        schoolBranch: student.schoolBranch,
+      },
+      hasActiveBooking: !!activeAgreement,
+      pass: activeAgreement?.transportPass || null,
+      statusLabel,
+      statusBadgeColor,
+      detailMessage,
+      latestEvent: latestEvent
+        ? {
+            id: latestEvent.id,
+            eventType: latestEvent.eventType,
+            timestamp: latestEvent.timestamp,
+            scannedStop: latestEvent.scannedStop,
+            tripId: latestEvent.tripId,
+            driverName: latestEvent.trip?.driver
+              ? `${latestEvent.trip.driver.firstName} ${latestEvent.trip.driver.lastName}`
+              : null,
+            driverPhone: latestEvent.trip?.driver?.phone || null,
+            vehiclePlate: latestEvent.trip?.vehicle?.plateNumber || null,
+          }
+        : null,
+      activeAgreement: activeAgreement
+        ? {
+            id: activeAgreement.id,
+            routeId: activeAgreement.routeId,
+            routeName: activeAgreement.route.name,
+            pickupStopName: activeAgreement.pickupStopName,
+            providerName: `${activeAgreement.provider.firstName} ${activeAgreement.provider.lastName}`,
+            providerPhone: activeAgreement.provider.phone,
+            vehiclePlate: activeAgreement.vehicle.plateNumber,
+            vehicleModel: `${activeAgreement.vehicle.make} ${activeAgreement.vehicle.model}`,
+          }
+        : null,
+    };
   }
 }
 
