@@ -34,6 +34,34 @@ router.post(
   transportationController.createStudent.bind(transportationController)
 );
 
+router.get(
+  '/students/:id',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.getStudentById.bind(transportationController)
+);
+
+(router as any).patch(
+  '/students/:id',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.updateStudent.bind(transportationController)
+);
+
+router.put(
+  '/students/:id',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.updateStudent.bind(transportationController)
+);
+
+router.delete(
+  '/students/:id',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.deleteStudent.bind(transportationController)
+);
+
 // 3. Transportation Requests
 router.post(
   '/requests',

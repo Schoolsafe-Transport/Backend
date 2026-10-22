@@ -10,6 +10,7 @@ import {
   CancelAgreementInput,
   ProcessPaymentInput,
   CreateStudentInput,
+  UpdateStudentInput,
   CreateVehicleInput,
   UpdateVehicleInput,
   CreateRouteInput,
@@ -32,31 +33,26 @@ export class TransportationService {
       availableSeats: {
         gt: 0,
       },
+      provider: {
+        status: 'ACTIVE',
+      },
+      vehicle: {
+        status: 'ACTIVE',
+      },
     };
 
     if (query.verified === true) {
-      where.provider = {
-        isVerified: true,
-        status: 'ACTIVE',
-      };
-      where.vehicle = {
-        isVerified: true,
-        status: 'ACTIVE',
-      };
+      where.provider.isVerified = true;
+      where.vehicle.isVerified = true;
     } else if (query.verified === false) {
-      where.provider = {
-        isVerified: false,
-      };
+      where.provider.isVerified = false;
     }
 
     if (query.vehicleType) {
-      where.vehicle = {
-        ...(where.vehicle || {}),
-        OR: [
-          { make: { contains: query.vehicleType, mode: 'insensitive' } },
-          { model: { contains: query.vehicleType, mode: 'insensitive' } },
-        ],
-      };
+      where.vehicle.OR = [
+        { make: { contains: query.vehicleType, mode: 'insensitive' } },
+        { model: { contains: query.vehicleType, mode: 'insensitive' } },
+      ];
     }
 
     if (query.school) {
@@ -1248,6 +1244,101 @@ export class TransportationService {
     });
   }
 
+  /**
+   * Helper: Get student by ID with ownership enforcement.
+   */
+  async getStudentById(studentId: string, userId: string, userRole: string) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (!student) {
+      const err: any = new Error('Student not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isParent = student.parentId === userId;
+
+    if (!isAdmin && !isParent) {
+      const err: any = new Error('Forbidden: You do not have permission to view this child record');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    return student;
+  }
+
+  /**
+   * Helper: Update student record with ownership enforcement.
+   */
+  async updateStudent(studentId: string, userId: string, userRole: string, input: UpdateStudentInput) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (!student) {
+      const err: any = new Error('Student not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isParent = student.parentId === userId;
+
+    if (!isAdmin && !isParent) {
+      const err: any = new Error('Forbidden: You do not have permission to modify this child record');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    return prisma.student.update({
+      where: { id: studentId },
+      data: {
+        ...(input.firstName !== undefined && { firstName: input.firstName }),
+        ...(input.lastName !== undefined && { lastName: input.lastName }),
+        ...(input.gender !== undefined && { gender: input.gender }),
+        ...(input.dateOfBirth !== undefined && {
+          dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
+        }),
+        ...(input.grade !== undefined && { grade: input.grade }),
+        ...(input.schoolName !== undefined && { schoolName: input.schoolName }),
+        ...(input.schoolBranch !== undefined && { schoolBranch: input.schoolBranch }),
+        ...(input.homeAddress !== undefined && { homeAddress: input.homeAddress }),
+        ...(input.emergencyPhone !== undefined && { emergencyPhone: input.emergencyPhone }),
+      },
+    });
+  }
+
+  /**
+   * Helper: Delete student record with ownership enforcement.
+   */
+  async deleteStudent(studentId: string, userId: string, userRole: string) {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+    });
+
+    if (!student) {
+      const err: any = new Error('Student not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isParent = student.parentId === userId;
+
+    if (!isAdmin && !isParent) {
+      const err: any = new Error('Forbidden: You do not have permission to delete this child record');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    return prisma.student.delete({
+      where: { id: studentId },
+    });
+  }
+
   // ==========================================
   // Fleet / Vehicle Management for Providers
   // ==========================================
@@ -1646,7 +1737,28 @@ export class TransportationService {
     return updatedTrip;
   }
 
-  async getTripPassengers(tripId: string) {
+  async getTripPassengers(tripId: string, userId: string, userRole: string) {
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: { route: true },
+    });
+
+    if (!trip) {
+      const error: AppError = new Error('Trip not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+    const isAssignedDriver = trip.driverId === userId;
+    const isRouteProvider = trip.route?.providerId === userId;
+
+    if (!isAdmin && !isAssignedDriver && !isRouteProvider) {
+      const error: AppError = new Error('Access denied: You are not authorized to view passenger information for this trip');
+      error.statusCode = 403;
+      throw error;
+    }
+
     return prisma.tripPassenger.findMany({
       where: { tripId },
       include: {

@@ -3,8 +3,21 @@ import { z, type infer as zInfer } from 'zod';
 export const createCampaignSchema = z.object({
   title: z.string().min(3, 'Campaign title must be at least 3 characters').trim(),
   description: z.string().optional(),
-  bannerUrl: z.string().url('Banner must be a valid image URL'),
-  targetUrl: z.string().url('Target URL must be a valid web address').optional(),
+  bannerUrl: z
+    .string()
+    .url('Banner must be a valid image URL')
+    .refine(
+      (url: string) => { try { const p = new URL(url); return p.protocol === 'http:' || p.protocol === 'https:'; } catch { return false; } },
+      'Banner URL must use the http or https protocol'
+    ),
+  targetUrl: z
+    .string()
+    .url('Target URL must be a valid web address')
+    .refine(
+      (url: string) => { try { const p = new URL(url); return p.protocol === 'http:' || p.protocol === 'https:'; } catch { return false; } },
+      'Target URL must use the http or https protocol'
+    )
+    .optional(),
   packageId: z.string().uuid('Package ID must be a valid UUID').optional(),
   placement: z.enum(['DASHBOARD_BANNER', 'LANDING_PAGE', 'SIDEBAR']).default('DASHBOARD_BANNER'),
 });

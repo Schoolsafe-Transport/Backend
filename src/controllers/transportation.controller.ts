@@ -10,6 +10,7 @@ import {
   cancelAgreementSchema,
   processPaymentSchema,
   createStudentSchema,
+  updateStudentSchema,
   createVehicleSchema,
   updateVehicleSchema,
   createRouteSchema,
@@ -250,6 +251,49 @@ export class TransportationController {
     }
   }
 
+  async getStudentById(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const student = await transportationService.getStudentById(req.params.id, req.user!.id, req.user!.role);
+      res.json({
+        success: true,
+        data: student,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateStudent(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const validatedInput = updateStudentSchema.parse(req.body);
+      const student = await transportationService.updateStudent(
+        req.params.id,
+        req.user!.id,
+        req.user!.role,
+        validatedInput
+      );
+      res.json({
+        success: true,
+        message: 'Child record updated successfully',
+        data: student,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async deleteStudent(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await transportationService.deleteStudent(req.params.id, req.user!.id, req.user!.role);
+      res.json({
+        success: true,
+        message: 'Child record deleted successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   // ==========================================
   // Fleet / Vehicles
   // ==========================================
@@ -414,7 +458,11 @@ export class TransportationController {
 
   async getTripPassengers(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
-      const passengers = await transportationService.getTripPassengers(req.params.id);
+      const passengers = await transportationService.getTripPassengers(
+        req.params.id,
+        req.user!.id,
+        req.user!.role
+      );
       res.json({
         success: true,
         data: passengers,

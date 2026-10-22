@@ -65,6 +65,9 @@ export const createStudentSchema = z.object({
   emergencyPhone: z.string().optional(),
 });
 
+export const updateStudentSchema = createStudentSchema.partial();
+export type UpdateStudentInput = zInfer<typeof updateStudentSchema>;
+
 export const createVehicleSchema = z.object({
   make: z.string().min(1, { message: 'Vehicle make is required' }),
   model: z.string().min(1, { message: 'Vehicle model is required' }),
