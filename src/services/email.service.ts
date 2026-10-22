@@ -46,6 +46,24 @@ export class EmailService {
   }
 
   /**
+   * Verifies live SMTP transporter connection.
+   */
+  public async verifyConnection(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.isConfigured() || !this.transporter) {
+      return {
+        ok: false,
+        error: 'SMTP host, user, or password environment variables are not configured.',
+      };
+    }
+    try {
+      await this.transporter.verify();
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  /**
    * Dispatches a single-use cryptographically secure email verification link.
    * Never claims delivery occurred if SMTP configuration is absent or delivery fails.
    */
@@ -57,23 +75,12 @@ export class EmailService {
     const verificationUrl = `${env.CLIENT_URL}/verify-email?token=${encodeURIComponent(rawToken)}`;
 
     if (!this.isConfigured()) {
-      if (env.NODE_ENV === 'production') {
-        const errMsg = 'SMTP credentials not configured. Outbound email delivery is disabled.';
-        console.error(`[EmailService] ${errMsg}`);
-        return {
-          delivered: false,
-          error: errMsg,
-          verificationUrl,
-        };
-      }
-
-      // Safe development/test simulation
-      console.log(
-        `\n[EmailService - DEV SIMULATION]\nTo: ${toEmail}\nRecipient: ${recipientName}\nAction: Verify Email\nLink: ${verificationUrl}\n`
-      );
+      const errMsg = 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) not configured. Outbound email delivery could not be performed.';
+      console.warn(`[EmailService] ${errMsg}`);
       return {
         delivered: false,
-        simulated: true,
+        error: errMsg,
+        simulated: env.NODE_ENV !== 'production',
         verificationUrl,
       };
     }
