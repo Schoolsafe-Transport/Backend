@@ -16,18 +16,22 @@ const envSchema = z.object({
 
   // Fayda National ID (OIDC / eSignet) — optional in dev, required in prod
   FAYDA_CLIENT_ID: z.string().optional(),
+  FAYDA_CLIENT_SECRET: z.string().optional(),
   FAYDA_REDIRECT_URI: z.string().default('http://localhost:5000/api/fayda/callback'),
   FAYDA_ISSUER_URL: z.string().default('https://esignet.ida.fayda.et'),
   FAYDA_AUTHORIZE_URL: z.string().default('https://esignet.ida.fayda.et/authorize'),
   FAYDA_TOKEN_URL: z.string().default('https://esignet.ida.fayda.et/v1/esignet/oauth/v2/token'),
   FAYDA_USERINFO_URL: z.string().default('https://esignet.ida.fayda.et/v1/esignet/oidc/userinfo'),
 
-  // Email (optional — SMTP for password reset emails)
+  // Email (SMTP for account verification and notification emails)
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   EMAIL_FROM: z.string().default('noreply@schoolsafe.et'),
+
+  // Private File Storage (Receipts & Evidence)
+  RECEIPTS_STORAGE_DIR: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
