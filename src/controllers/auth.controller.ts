@@ -108,10 +108,8 @@ export class AuthController {
         return;
       }
       const result = await authService.resendVerificationEmail(identifier);
-      res.status(200).json({
-        success: true,
-        ...result,
-      });
+      const statusCode = result.success ? 200 : 502;
+      res.status(statusCode).json(result);
     } catch (error) {
       next(error);
     }
