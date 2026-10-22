@@ -114,7 +114,7 @@ describe('Task 9: Child Privacy & Transport Provider Verification', () => {
 
     await prisma.user.updateMany({
       where: { id: { in: [providerId, driver1Id, driver2Id] } },
-      data: { isEmailVerified: true, status: 'ACTIVE' },
+      data: { isEmailVerified: true, status: 'ACTIVE', isVerified: true },
     });
 
     // 6. Create a Vehicle and an Active Route for Provider
