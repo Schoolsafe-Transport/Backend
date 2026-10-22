@@ -17,6 +17,7 @@ import {
   updateRouteSchema,
   createTripSchema,
   recordBoardingSchema,
+  scanPassSchema,
   createAuthorizedPickupSchema,
   createSafetyIncidentSchema,
 } from '../schemas/transportation.schema';
@@ -580,6 +581,118 @@ export class TransportationController {
       res.json({
         success: true,
         data: incidents,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async uploadPaymentReceipt(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params; // agreementId
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          message: 'Payment receipt file is required (JPEG, PNG, or PDF up to 5MB)',
+        });
+        return;
+      }
+      const { notes } = req.body;
+      const payment = await transportationService.uploadPaymentReceipt(id, req.user!.id, file, notes);
+      res.status(201).json({
+        success: true,
+        message: 'Payment receipt uploaded successfully. Evidence is pending administrator review.',
+        data: payment,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPaymentReceipt(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { paymentId } = req.params;
+      const { filePath, mimeType, originalName } = await transportationService.getPaymentReceipt(
+        paymentId,
+        req.user!.id,
+        req.user!.role
+      );
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+      res.sendFile(filePath);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getStudentTransportPass(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const agreementId = req.params.id;
+      const pass = await transportationService.getOrCreateStudentTransportPass(
+        agreementId,
+        req.user!.id,
+        req.user!.role
+      );
+      res.json({
+        success: true,
+        data: pass,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async regenerateStudentTransportPass(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const agreementId = req.params.id;
+      const pass = await transportationService.regenerateStudentTransportPass(
+        agreementId,
+        req.user!.id,
+        req.user!.role
+      );
+      res.json({
+        success: true,
+        message: 'Transport pass rotated and regenerated successfully',
+        data: pass,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async scanStudentPass(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tripId = req.params.id || req.params.tripId;
+      const validatedInput = scanPassSchema.parse(req.body);
+      const result = await transportationService.scanStudentPass(
+        tripId,
+        req.user!.id,
+        req.user!.role,
+        validatedInput
+      );
+      res.json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getStudentTripStatus(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const studentId = req.params.id || req.params.studentId;
+      const status = await transportationService.getStudentTripStatus(
+        studentId,
+        req.user!.id,
+        req.user!.role
+      );
+      res.json({
+        success: true,
+        data: status,
       });
     } catch (error) {
       next(error);
