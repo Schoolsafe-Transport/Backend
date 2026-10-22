@@ -126,6 +126,47 @@ export class AdminController {
       next(error);
     }
   }
+
+  async listPayments(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { status, search, page, limit } = req.query as any;
+      const result = await adminService.listPayments({
+        status,
+        search,
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reviewPayment(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { paymentId } = req.params;
+      const { decision, reason } = req.body;
+      if (!['APPROVE', 'REJECT', 'REQUEST_NEW_RECEIPT'].includes(decision)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid decision. Must be APPROVE, REJECT, or REQUEST_NEW_RECEIPT',
+        });
+        return;
+      }
+
+      const updated = await adminService.reviewPayment(paymentId, req.user!.id, decision, reason);
+      res.status(200).json({
+        success: true,
+        message: `Payment evidence decision '${decision}' recorded successfully`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();
