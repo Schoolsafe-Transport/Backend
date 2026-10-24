@@ -90,9 +90,17 @@ model User {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
+  businessName        String?
+  licenseNumber       String?
+  serviceArea         String?
+  registrationStep    Int                  @default(1)
+
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  accountDocuments        AccountDocument[]    @relation("UserDocuments")
+  auditLogsInitiated      AuditLog[]           @relation("AdminAuditLogs")
+  auditLogsReceived       AuditLog[]           @relation("TargetUserAuditLogs")
 
   // Marketplace relations
   students            Student[]            @relation("ParentStudents")
@@ -145,17 +153,19 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
-// Secure Email Verification Token Model (Stores SHA-256 Hash of raw token)
+// Secure Email Verification Token Model (Stores SHA-256 Hash of raw token & optional 6-digit numeric code)
 model EmailVerificationToken {
-  id        String   @id @default(uuid())
-  tokenHash String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  used      Boolean  @default(false)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id           String   @id @default(uuid())
+  tokenHash    String   @unique
+  sixDigitCode String?
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  used         Boolean  @default(false)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
 
   @@index([userId])
+  @@index([sixDigitCode])
   @@map("email_verification_tokens")
 }
 
@@ -706,4 +716,59 @@ model AdvertisementEvent {
   @@index([campaignId])
   @@map("advertisement_events")
 }
+
+// ==========================================
+// Account Documents & Verification
+// ==========================================
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model AccountDocument {
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation("UserDocuments", fields: [userId], references: [id], onDelete: Cascade)
+  documentType    String         // DRIVER_LICENSE, BUSINESS_REGISTRATION, TAX_CERTIFICATE, TRANSPORT_PERMIT, IDENTITY_CARD
+  documentName    String
+  fileUrl         String
+  fileMimeType    String?
+  fileSize        Int?
+  status          DocumentStatus @default(PENDING)
+  rejectionReason String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  expiryDate      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("account_documents")
+}
+
+// ==========================================
+// Administrative Audit Trail
+// ==========================================
+
+model AuditLog {
+  id           String    @id @default(uuid())
+  adminId      String
+  admin        User      @relation("AdminAuditLogs", fields: [adminId], references: [id], onDelete: Cascade)
+  targetUserId String?
+  targetUser   User?     @relation("TargetUserAuditLogs", fields: [targetUserId], references: [id], onDelete: SetNull)
+  action       String    // APPROVE_USER, REJECT_USER, SUSPEND_USER, APPROVE_PAYMENT, REJECT_PAYMENT, APPROVE_CAMPAIGN, REJECT_CAMPAIGN, RESOLVE_INCIDENT
+  entityType   String    // USER, PAYMENT, CAMPAIGN, VEHICLE, INCIDENT
+  entityId     String
+  details      String?
+  createdAt    DateTime  @default(now())
+
+  @@index([adminId])
+  @@index([targetUserId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
 
