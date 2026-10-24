@@ -167,6 +167,165 @@ export class AdminController {
       next(error);
     }
   }
+
+  async listAuditLogs(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+      const logs = await adminService.listAuditLogs(limit);
+      res.status(200).json({
+        success: true,
+        data: logs,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reviewAccountDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { decision, reason } = req.body;
+      if (!['APPROVE', 'REJECT'].includes(decision)) {
+        res.status(400).json({
+          success: false,
+          message: 'Decision must be APPROVE or REJECT',
+        });
+        return;
+      }
+
+      const updated = await adminService.reviewAccountDocument(id, decision, reason, req.user?.id);
+      res.status(200).json({
+        success: true,
+        message: `Document decision '${decision}' recorded`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listVehicles(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { page, limit, status, isVerified, search } = req.query as any;
+      const parsedIsVerified =
+        isVerified === 'true' ? true : isVerified === 'false' ? false : undefined;
+
+      const result = await adminService.listVehicles({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status,
+        isVerified: parsedIsVerified,
+        search,
+      });
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reviewVehicle(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { vehicleId } = req.params;
+      const { decision, reason } = req.body;
+      if (!['APPROVE', 'REJECT'].includes(decision)) {
+        res.status(400).json({
+          success: false,
+          message: 'Decision must be APPROVE or REJECT',
+        });
+        return;
+      }
+
+      const updated = await adminService.reviewVehicle(vehicleId, decision, reason, req.user?.id);
+      res.status(200).json({
+        success: true,
+        message: `Vehicle decision '${decision}' applied successfully`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listRoutes(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { page, limit, status, search } = req.query as any;
+      const result = await adminService.listRoutes({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status,
+        search,
+      });
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listTrips(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { page, limit, status, search } = req.query as any;
+      const result = await adminService.listTrips({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status,
+        search,
+      });
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async listCampaigns(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { page, limit, status, search } = req.query as any;
+      const result = await adminService.listCampaigns({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status,
+        search,
+      });
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reviewCampaign(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { campaignId } = req.params;
+      const { decision, reason } = req.body;
+      if (!['APPROVE', 'REJECT'].includes(decision)) {
+        res.status(400).json({
+          success: false,
+          message: 'Decision must be APPROVE or REJECT',
+        });
+        return;
+      }
+
+      const updated = await adminService.reviewCampaign(campaignId, decision, reason, req.user?.id);
+      res.status(200).json({
+        success: true,
+        message: `Campaign decision '${decision}' applied successfully`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();
+
