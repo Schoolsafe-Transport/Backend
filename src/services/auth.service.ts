@@ -10,15 +10,18 @@ import {
   verifyRefreshToken,
   sanitizeUser,
 } from '../utils/security.util';
+import { getDocumentFilePath } from '../utils/documentStorage.util';
 import {
   RegisterInput,
   LoginInput,
   AuthResponse,
   AuthTokens,
   UserSanitized,
+  UserRole,
   ChangePasswordInput,
   UpdateProfileInput,
 } from '../types/auth.types';
+
 import { AppError } from '../middleware/errorHandler';
 
 export class AuthService {
@@ -26,7 +29,7 @@ export class AuthService {
    * Generates a cryptographically secure, time-limited single-use email verification token.
    * Stores the SHA-256 hash in the database and applies a 60-second resend rate limit.
    */
-  async generateEmailVerificationToken(userId: string): Promise<string> {
+  async generateEmailVerificationToken(userId: string): Promise<{ rawToken: string; sixDigitCode: string }> {
     // 60-second rate limiting per user
     const recentToken = await prisma.emailVerificationToken.findFirst({
       where: {
@@ -47,21 +50,23 @@ export class AuthService {
       data: { used: true },
     });
 
-    // Generate 32 bytes cryptographically random raw token
+    // Generate 32 bytes cryptographically random raw token & 6-digit numeric verification code
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const sixDigitCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes validity
 
     await prisma.emailVerificationToken.create({
       data: {
         tokenHash,
+        sixDigitCode,
         userId,
         used: false,
         expiresAt,
       },
     });
 
-    return rawToken;
+    return { rawToken, sixDigitCode };
   }
 
   /**
@@ -129,8 +134,9 @@ export class AuthService {
       email: user.email,
       role: user.role as any,
       status: user.status as any,
-      isEmailVerified: false,
+      scope: 'ONBOARDING' as const,
     };
+
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
@@ -149,10 +155,13 @@ export class AuthService {
 
     // Generate single-use email verification token & dispatch email
     let verificationToken: string | undefined;
+    let sixDigitCode: string | undefined;
     let emailDelivery: { delivered: boolean; error?: string } = { delivered: false };
     try {
-      verificationToken = await this.generateEmailVerificationToken(user.id);
-      const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken);
+      const generated = await this.generateEmailVerificationToken(user.id);
+      verificationToken = generated.rawToken;
+      sixDigitCode = generated.sixDigitCode;
+      const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken, sixDigitCode);
       emailDelivery = {
         delivered: sendRes.delivered,
         ...(sendRes.error ? { error: sendRes.error } : {}),
@@ -170,7 +179,7 @@ export class AuthService {
         expiresIn: env.JWT_ACCESS_EXPIRES_IN,
       },
       emailDelivery,
-      ...(env.NODE_ENV !== 'production' && verificationToken ? { verificationToken } : {}),
+      ...(env.NODE_ENV !== 'production' && verificationToken ? { verificationToken, sixDigitCode } : {}),
     };
   }
 
@@ -178,19 +187,35 @@ export class AuthService {
    * Consumes a single-use email verification token and marks user email as verified.
    * Strictly isolates email verification from Fayda identity and administrator approval.
    */
-  async verifyEmail(rawToken: string): Promise<{ message: string; user: UserSanitized }> {
+  async verifyEmail(
+    rawToken: string
+  ): Promise<{ message: string; user: UserSanitized; tokens?: AuthTokens; nextStep?: string }> {
     if (!rawToken || typeof rawToken !== 'string') {
       const error: AppError = new Error('Verification token is required');
       error.statusCode = 400;
       throw error;
     }
 
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const cleanInput = rawToken.trim();
+    let tokenRecord = null;
 
-    const tokenRecord = await prisma.emailVerificationToken.findUnique({
-      where: { tokenHash },
-      include: { user: true },
-    });
+    // 1. If user supplied a 6-digit numeric verification code
+    if (/^\d{6}$/.test(cleanInput)) {
+      tokenRecord = await prisma.emailVerificationToken.findFirst({
+        where: { sixDigitCode: cleanInput, used: false },
+        include: { user: true },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    // 2. Fall back to SHA-256 token hash lookup (direct link clicks or test tokens)
+    if (!tokenRecord) {
+      const tokenHash = crypto.createHash('sha256').update(cleanInput).digest('hex');
+      tokenRecord = await prisma.emailVerificationToken.findUnique({
+        where: { tokenHash },
+        include: { user: true },
+      });
+    }
 
     if (!tokenRecord) {
       const error: AppError = new Error('Invalid email verification token');
@@ -225,18 +250,38 @@ export class AuthService {
       }),
     ]);
 
+    const isFullyVerified = true;
+
+    const jwtPayload = {
+      userId: updatedUser.id,
+      email: updatedUser.email,
+      role: updatedUser.role as any,
+      status: updatedUser.status as any,
+      scope: 'FULL' as const,
+    };
+
+    const accessToken = generateAccessToken(jwtPayload);
+    const refreshToken = generateRefreshToken(jwtPayload);
+
     return {
       message: 'Email address verified successfully.',
       user: sanitizeUser(updatedUser),
+      tokens: {
+        accessToken,
+        refreshToken,
+        expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+      },
+      nextStep: 'DASHBOARD',
     };
   }
+
 
   /**
    * Dispatches a fresh email verification link with rate limiting.
    */
   async resendVerificationEmail(
     identifier: string
-  ): Promise<{ success: boolean; delivered: boolean; message: string; error?: string; verificationToken?: string; verificationUrl?: string }> {
+  ): Promise<{ success: boolean; delivered: boolean; message: string; error?: string; verificationToken?: string; sixDigitCode?: string; verificationUrl?: string }> {
     const user = await prisma.user.findFirst({
       where: {
         OR: [
@@ -263,8 +308,8 @@ export class AuthService {
       };
     }
 
-    const rawToken = await this.generateEmailVerificationToken(user.id);
-    const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken);
+    const { rawToken, sixDigitCode } = await this.generateEmailVerificationToken(user.id);
+    const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode);
 
     if (!dispatchResult.delivered) {
       return {
@@ -274,7 +319,7 @@ export class AuthService {
           ? `Could not deliver verification email: ${dispatchResult.error}`
           : 'Verification link generated, but outbound email delivery failed. SMTP credentials must be configured on the server.',
         error: dispatchResult.error || 'SMTP delivery unavailable',
-        ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, verificationUrl: dispatchResult.verificationUrl } : {}),
+        ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, sixDigitCode, verificationUrl: dispatchResult.verificationUrl } : {}),
       };
     }
 
@@ -282,7 +327,7 @@ export class AuthService {
       success: true,
       delivered: true,
       message: 'A fresh verification link has been sent to your email address.',
-      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, verificationUrl: dispatchResult.verificationUrl } : {}),
+      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, sixDigitCode, verificationUrl: dispatchResult.verificationUrl } : {}),
     };
   }
 
@@ -297,6 +342,7 @@ export class AuthService {
     if (!user) {
       const error: AppError = new Error('Invalid email or password');
       error.statusCode = 401;
+      error.code = 'UNAUTHENTICATED';
       throw error;
     }
 
@@ -304,26 +350,53 @@ export class AuthService {
     if (!isPasswordValid) {
       const error: AppError = new Error('Invalid email or password');
       error.statusCode = 401;
+      error.code = 'UNAUTHENTICATED';
       throw error;
     }
 
     if (user.status === 'SUSPENDED') {
       const error: AppError = new Error('Your account has been suspended. Please contact support.');
       error.statusCode = 403;
+      error.code = 'FORBIDDEN';
       throw error;
     }
 
     if (user.status === 'REJECTED') {
       const error: AppError = new Error('Your account application was rejected.');
       error.statusCode = 403;
+      error.code = 'FORBIDDEN';
       throw error;
     }
+
+    // TASK 3: Deny normal login if email is not verified
+    if (!user.isEmailVerified) {
+      const onboardingToken = generateAccessToken({
+        userId: user.id,
+        email: user.email,
+        role: user.role as any,
+        status: user.status as any,
+        scope: 'ONBOARDING',
+      });
+
+      const error: AppError = new Error('Email verification required. Please verify your email address to continue.');
+      error.statusCode = 403;
+      error.code = 'EMAIL_VERIFICATION_REQUIRED';
+      error.details = {
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+        email: user.email,
+        user: sanitizeUser(user),
+        onboardingToken,
+      };
+      throw error;
+    }
+
 
     const jwtPayload = {
       userId: user.id,
       email: user.email,
       role: user.role as any,
       status: user.status as any,
+      scope: 'FULL' as const,
     };
 
     const accessToken = generateAccessToken(jwtPayload);
@@ -360,6 +433,7 @@ export class AuthService {
     } catch (_err) {
       const error: AppError = new Error('Invalid or expired refresh token');
       error.statusCode = 401;
+      error.code = 'UNAUTHENTICATED';
       throw error;
     }
 
@@ -378,6 +452,7 @@ export class AuthService {
       }
       const error: AppError = new Error('Refresh token is invalid, expired, or revoked');
       error.statusCode = 401;
+      error.code = 'UNAUTHENTICATED';
       throw error;
     }
 
@@ -388,11 +463,35 @@ export class AuthService {
     });
 
     const user = tokenRecord.user;
+
+    if (user.status === 'SUSPENDED' || user.status === 'REJECTED') {
+      const error: AppError = new Error('Account suspended or rejected');
+      error.statusCode = 403;
+      error.code = 'FORBIDDEN';
+      throw error;
+    }
+
+    if (!user.isEmailVerified) {
+      const error: AppError = new Error('Email verification required');
+      error.statusCode = 403;
+      error.code = 'EMAIL_VERIFICATION_REQUIRED';
+      throw error;
+    }
+
+    const rolesRequiringFayda: UserRole[] = ['PARENT', 'TRANSPORT_PROVIDER', 'DRIVER'];
+    if (rolesRequiringFayda.includes(user.role as any) && !user.isVerified) {
+      const error: AppError = new Error('Fayda National ID verification required');
+      error.statusCode = 403;
+      error.code = 'FAYDA_VERIFICATION_REQUIRED';
+      throw error;
+    }
+
     const newPayload = {
       userId: user.id,
       email: user.email,
       role: user.role as any,
       status: user.status as any,
+      scope: 'FULL' as const,
     };
 
     const newAccessToken = generateAccessToken(newPayload);
@@ -415,6 +514,7 @@ export class AuthService {
       expiresIn: env.JWT_ACCESS_EXPIRES_IN,
     };
   }
+
 
   /**
    * Invalidates a refresh token to securely terminate user session.
@@ -594,6 +694,167 @@ export class AuthService {
     });
 
     return sanitizeUser(updated);
+  }
+
+  /**
+   * Saves onboarding profile details (legal/business name, license, service area, etc.)
+   */
+  async saveOnboardingProfile(
+    userId: string,
+    input: {
+      businessName?: string;
+      licenseNumber?: string;
+      serviceArea?: string;
+      phone?: string;
+      step?: number;
+    }
+  ): Promise<UserSanitized> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(input.businessName ? { businessName: input.businessName.trim() } : {}),
+        ...(input.licenseNumber ? { licenseNumber: input.licenseNumber.trim() } : {}),
+        ...(input.serviceArea ? { serviceArea: input.serviceArea.trim() } : {}),
+        ...(input.phone ? { phone: input.phone.trim() } : {}),
+        ...(input.step ? { registrationStep: input.step } : {}),
+      },
+      include: {
+        accountDocuments: true,
+      },
+    });
+
+    return sanitizeUser(updated);
+  }
+
+  /**
+   * Uploads and stores an account verification document (driver license, business registration, etc.)
+   */
+  async uploadAccountDocument(
+    userId: string,
+    file: Express.Multer.File,
+    documentType: string,
+    documentName?: string,
+    expiryDate?: string
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const doc = await prisma.accountDocument.create({
+      data: {
+        userId,
+        documentType: documentType.trim(),
+        documentName: documentName ? documentName.trim() : file.originalname,
+        fileUrl: file.filename,
+        fileMimeType: file.mimetype,
+        fileSize: file.size,
+        status: 'PENDING',
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+      },
+    });
+
+    return {
+      id: doc.id,
+      documentType: doc.documentType,
+      documentName: doc.documentName,
+      status: doc.status,
+      createdAt: doc.createdAt,
+    };
+  }
+
+  /**
+   * Retrieves all account documents for the authenticated user.
+   */
+  async getMyDocuments(userId: string) {
+    const docs = await prisma.accountDocument.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return docs.map((d: any) => ({
+      id: d.id,
+      documentType: d.documentType,
+      documentName: d.documentName,
+      status: d.status,
+      rejectionReason: d.rejectionReason,
+      expiryDate: d.expiryDate,
+      createdAt: d.createdAt,
+      reviewedAt: d.reviewedAt,
+      downloadUrl: `/api/auth/documents/${d.id}`,
+    }));
+  }
+
+  /**
+   * Securely serves a stored document with strict authorization check.
+   */
+  async getDocumentFile(documentId: string, requesterId: string, requesterRole: string) {
+    const doc = await prisma.accountDocument.findUnique({
+      where: { id: documentId },
+    });
+
+    if (!doc) {
+      const error: AppError = new Error('Document not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isAdmin = requesterRole === 'ADMIN' || requesterRole === 'SUPER_ADMIN';
+    const isOwner = doc.userId === requesterId;
+
+    if (!isAdmin && !isOwner) {
+      const error: AppError = new Error('Forbidden: You do not have permission to access this document');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const filePath = getDocumentFilePath(doc.fileUrl);
+    return {
+      filePath,
+      mimeType: doc.fileMimeType || 'application/pdf',
+      originalName: doc.documentName || 'document.pdf',
+    };
+  }
+
+  /**
+   * Retrieves full profile of the authenticated user including documents.
+   */
+  async getUserProfile(userId: string): Promise<UserSanitized & { accountDocuments: any[] }> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        accountDocuments: true,
+      },
+    });
+
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const sanitized = sanitizeUser(user);
+    return {
+      ...sanitized,
+      accountDocuments: (user.accountDocuments || []).map((d: any) => ({
+        id: d.id,
+        documentType: d.documentType,
+        documentName: d.documentName,
+        status: d.status,
+        rejectionReason: d.rejectionReason,
+        expiryDate: d.expiryDate,
+        createdAt: d.createdAt,
+      })),
+    };
   }
 }
 
