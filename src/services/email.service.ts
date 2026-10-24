@@ -19,16 +19,28 @@ export class EmailService {
   private initializeTransporter() {
     if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
       try {
-        const port = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 587;
-        this.transporter = nodemailer.createTransport({
-          host: env.SMTP_HOST,
-          port,
-          secure: port === 465,
-          auth: {
-            user: env.SMTP_USER,
-            pass: env.SMTP_PASS,
-          },
-        });
+        const port = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 465;
+        const cleanPass = env.SMTP_PASS.replace(/\s+/g, '');
+
+        if (env.SMTP_HOST.toLowerCase().includes('gmail')) {
+          this.transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+              user: env.SMTP_USER,
+              pass: cleanPass,
+            },
+          });
+        } else {
+          this.transporter = nodemailer.createTransport({
+            host: env.SMTP_HOST,
+            port,
+            secure: port === 465,
+            auth: {
+              user: env.SMTP_USER,
+              pass: cleanPass,
+            },
+          });
+        }
       } catch (err: any) {
         console.error('[EmailService] Failed to initialize SMTP transporter:', err.message);
         this.transporter = null;
@@ -70,7 +82,8 @@ export class EmailService {
   public async sendVerificationEmail(
     toEmail: string,
     recipientName: string,
-    rawToken: string
+    rawToken: string,
+    sixDigitCode?: string
   ): Promise<EmailDispatchResult> {
     const verificationUrl = `${env.CLIENT_URL}/verify-email?token=${encodeURIComponent(rawToken)}`;
 
@@ -90,29 +103,45 @@ export class EmailService {
         from: `"SchoolSafe Smart Transit" <${env.EMAIL_FROM}>`,
         to: toEmail,
         subject: 'Verify your SchoolSafe email address',
-        text: `Welcome to SchoolSafe!\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\nThis link expires after 30 minutes. If you did not create this account, you can ignore this email.`,
+        text: `Welcome to SchoolSafe!\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\n${
+          sixDigitCode ? `Or enter this 6-digit verification code: ${sixDigitCode}\n\n` : ''
+        }This link and code expire in 30 minutes. If you did not create this account, you can ignore this email.`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
             <div style="text-align: center; margin-bottom: 24px;">
-              <h2 style="color: #1e3a8a; margin: 0;">SchoolSafe</h2>
+              <h2 style="color: #1e3a8a; margin: 0; font-size: 24px;">SchoolSafe</h2>
               <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Smart School Transportation Safeguarding</p>
             </div>
-            <p style="font-size: 16px; font-weight: 600; color: #1e293b;">Welcome to SchoolSafe!</p>
+            <p style="font-size: 16px; font-weight: 600; color: #1e293b;">Welcome to SchoolSafe, ${recipientName || 'Member'}!</p>
             <p style="font-size: 14px; color: #334155; line-height: 1.6;">
-              Please verify your email address by clicking the button below.
+              Please click the button below to verify your email address and activate your account.
             </p>
             <div style="text-align: center; margin: 28px 0;">
-              <a href="${verificationUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 15px; display: inline-block;">
-                Verify My Email
+              <a href="${verificationUrl}" style="background-color: #2563eb; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.25);">
+                Verify Email Address
               </a>
             </div>
+            ${
+              sixDigitCode
+                ? `
+            <div style="margin: 24px 0; padding: 16px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; text-align: center;">
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+                Or enter this 6-digit verification code in SchoolSafe
+              </p>
+              <div style="font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #1e3a8a; font-family: monospace;">
+                ${sixDigitCode}
+              </div>
+            </div>
+            `
+                : ''
+            }
             <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
-              Or copy and paste this link into your browser:<br />
+              If the button does not work, copy and paste this link into your browser:<br />
               <a href="${verificationUrl}" style="color: #2563eb; word-break: break-all;">${verificationUrl}</a>
             </p>
             <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
             <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
-              This link expires after 30 minutes. If you did not create this account, you can ignore this email.
+              This link and code expire in 30 minutes. If you did not create this account, you can ignore this email.
             </p>
           </div>
         `,
