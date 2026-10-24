@@ -29,7 +29,7 @@ export const comparePassword = async (
  */
 export const generateAccessToken = (payload: JWTPayload): string => {
   return jwt.sign(payload, env.JWT_ACCESS_SECRET, {
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+    expiresIn: env.JWT_ACCESS_EXPIRES_IN as any,
   });
 };
 
@@ -38,7 +38,7 @@ export const generateAccessToken = (payload: JWTPayload): string => {
  */
 export const generateRefreshToken = (payload: JWTPayload): string => {
   return jwt.sign(payload, env.JWT_REFRESH_SECRET, {
-    expiresIn: env.JWT_REFRESH_EXPIRES_IN,
+    expiresIn: env.JWT_REFRESH_EXPIRES_IN as any,
     jwtid: crypto.randomUUID(),
   });
 };
@@ -75,6 +75,11 @@ export const sanitizeUser = (user: User): UserSanitized => {
     emailVerifiedAt: (user as any).emailVerifiedAt ?? null,
     rejectionReason: (user as any).rejectionReason ?? null,
     profilePhoto: (user as any).profilePhoto || null,
+    businessName: (user as any).businessName ?? null,
+    licenseNumber: (user as any).licenseNumber ?? null,
+    serviceArea: (user as any).serviceArea ?? null,
+    registrationStep: (user as any).registrationStep ?? 1,
+    accountDocuments: (user as any).accountDocuments ?? undefined,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
