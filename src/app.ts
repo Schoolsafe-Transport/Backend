@@ -15,8 +15,23 @@ app.use(helmet({
 }));
 app.use(
   cors({
-    origin: [env.CLIENT_URL, 'http://localhost:3000', 'http://localhost:5173'],
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      // Allow requests with no origin (like mobile apps, server-to-server, curl)
+      if (!origin) return callback(null, true);
+
+      // Allow configured CLIENT_URL
+      if (origin === env.CLIENT_URL) return callback(null, true);
+
+      // Allow any localhost or 127.0.0.1 port (e.g. 5173, 5174, 3000)
+      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(null, false);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   })
 );
 
