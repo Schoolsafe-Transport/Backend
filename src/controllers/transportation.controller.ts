@@ -214,6 +214,18 @@ export class TransportationController {
     }
   }
 
+  async getMyPayments(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const payments = await transportationService.getMyPayments(req.user!.id);
+      res.json({
+        success: true,
+        data: payments,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getActivePassengers(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const passengers = await transportationService.getActivePassengers(req.user!.id);
