@@ -120,7 +120,43 @@ describe('Authentication & RBAC Test Suite', () => {
   });
 
   describe('POST /api/auth/login', () => {
-    it('should log in successfully with valid credentials', async () => {
+    it('should reject login with 403 EMAIL_VERIFICATION_REQUIRED when email is unverified', async () => {
+      const res = await request(app).post('/api/auth/login').send({
+        email: testParent.email,
+        password: testParent.password,
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('EMAIL_VERIFICATION_REQUIRED');
+      expect(res.body.message).toContain('Email verification required');
+      expect(res.body.details?.onboardingToken).toBeDefined();
+    });
+
+    it('should reject login with 403 FAYDA_VERIFICATION_REQUIRED when email is verified but Fayda is incomplete', async () => {
+      // Mark email as verified, but leave Fayda unverified
+      await prisma.user.update({
+        where: { email: testParent.email.toLowerCase() },
+        data: { isEmailVerified: true },
+      });
+
+      const res = await request(app).post('/api/auth/login').send({
+        email: testParent.email,
+        password: testParent.password,
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FAYDA_VERIFICATION_REQUIRED');
+      expect(res.body.message).toContain('Fayda National ID verification required');
+      expect(res.body.details?.onboardingToken).toBeDefined();
+    });
+
+    it('should log in successfully with valid credentials after email and Fayda are verified', async () => {
+      // Mark Fayda verified
+      await prisma.user.update({
+        where: { email: testParent.email.toLowerCase() },
+        data: { isVerified: true, faydaId: '********9012' },
+      });
+
       const res = await request(app).post('/api/auth/login').send({
         email: testParent.email,
         password: testParent.password,
@@ -151,6 +187,7 @@ describe('Authentication & RBAC Test Suite', () => {
       expect(res.status).toBe(401);
     });
   });
+
 
   describe('POST /api/auth/refresh-token', () => {
     it('should issue a new token pair and rotate the refresh token', async () => {
