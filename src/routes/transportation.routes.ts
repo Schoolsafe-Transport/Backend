@@ -185,6 +185,14 @@ router.get(
   transportationController.getPaymentReceipt.bind(transportationController)
 );
 
+// Parent Payments History
+router.get(
+  '/payments/my',
+  authenticate,
+  authorize('PARENT', 'ADMIN', 'SUPER_ADMIN'),
+  transportationController.getMyPayments.bind(transportationController)
+);
+
 // 5.1 Student Transport QR Pass
 router.get(
   '/agreements/:id/pass',
