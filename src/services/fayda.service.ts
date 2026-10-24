@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../config/prisma';
 import { env } from '../config/env';
 import { AppError } from '../middleware/errorHandler';
+import { generateAccessToken, generateRefreshToken } from '../utils/security.util';
 
 export interface FaydaVerificationResult {
   verified: boolean;
@@ -10,7 +11,13 @@ export interface FaydaVerificationResult {
   verifiedAt: Date;
   status: string;
   isSandbox?: boolean;
+  tokens?: {
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: string;
+  };
 }
+
 
 export interface FaydaSession {
   userId: string;
@@ -59,7 +66,8 @@ export class FaydaService {
    * Requires official National ID Authority (NIDA) partner onboarding credentials.
    */
   getAuthorizationUrl(userId: string): { authUrl: string; state: string } {
-    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
+    const isDevelopmentOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+    if (!this.isAuthorized() && !isDevelopmentOrTest) {
       const error: AppError = new Error(
         'Official Fayda eSignet OIDC integration is currently awaiting National ID Program (NIDA) partner authorization and client credentials (FAYDA_CLIENT_ID). Live verification cannot be initiated until credentials are configured.'
       );
@@ -146,8 +154,10 @@ export class FaydaService {
     let fullName: string;
     let isSandbox = false;
 
+    const isDevelopmentOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+
     if (!this.isAuthorized()) {
-      if (process.env.NODE_ENV === 'test') {
+      if (isDevelopmentOrTest) {
         // Test suite stub for OIDC integration assertions
         rawFin = '123456789012';
         fullName = `${user.firstName} ${user.lastName}`;
@@ -206,7 +216,7 @@ export class FaydaService {
     const maskedFaydaId = this.maskFaydaId(rawFin);
 
     // Update user to verified and store ONLY masked identifier
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         isVerified: true,
@@ -215,6 +225,25 @@ export class FaydaService {
       },
     });
 
+    const isFullyVerified = updatedUser.isEmailVerified && updatedUser.isVerified;
+    const tokens = {
+      accessToken: generateAccessToken({
+        userId: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role as any,
+        status: updatedUser.status as any,
+        scope: isFullyVerified ? ('FULL' as const) : ('ONBOARDING' as const),
+      }),
+      refreshToken: generateRefreshToken({
+        userId: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role as any,
+        status: updatedUser.status as any,
+        scope: isFullyVerified ? ('FULL' as const) : ('ONBOARDING' as const),
+      }),
+      expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+    };
+
     return {
       verified: true,
       faydaIdNumber: maskedFaydaId,
@@ -222,8 +251,10 @@ export class FaydaService {
       verifiedAt: new Date(),
       status: 'VERIFIED',
       isSandbox,
+      tokens,
     };
   }
+
 
   /**
    * Step 1: Initiates Fayda FIN identity verification.
@@ -248,8 +279,10 @@ export class FaydaService {
       throw error;
     }
 
+    const isDevelopmentOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+
     // Require authorized Fayda integration in non-test environments
-    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
+    if (!this.isAuthorized() && !isDevelopmentOrTest) {
       const error: AppError = new Error(
         'Authoritative Fayda identity verification is currently awaiting National ID Program (NIDA) partner authorization and credentials. Live verification cannot mark accounts as verified until authorized credentials (FAYDA_CLIENT_ID / FAYDA_CLIENT_SECRET) are configured.'
       );
@@ -257,7 +290,7 @@ export class FaydaService {
       throw error;
     }
 
-    const isTestMode = !this.isAuthorized() && process.env.NODE_ENV === 'test';
+    const isTestMode = !this.isAuthorized() && isDevelopmentOrTest;
     const transactionId = crypto.randomUUID();
     const otp = isTestMode ? '123456' : String(Math.floor(100000 + Math.random() * 900000));
     const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
@@ -279,7 +312,9 @@ export class FaydaService {
       maskedPhone,
       isSandbox: isTestMode,
       ...(isTestMode ? { simulatedOtp: otp } : {}),
-      message: `Fayda identity verification initiated. SMS OTP dispatched to ${maskedPhone}.`,
+      message: isTestMode
+        ? `[Sandbox Simulation] Fayda OTP generated. Use code ${otp} to verify.`
+        : `Fayda identity verification initiated. SMS OTP dispatched to ${maskedPhone}.`,
     };
   }
 
@@ -310,8 +345,10 @@ export class FaydaService {
       throw error;
     }
 
+    const isDevelopmentOrTest = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+
     // Authoritative verification requirement: simulated/mock OTP cannot mark an account as Fayda verified
-    if (!this.isAuthorized() && process.env.NODE_ENV !== 'test') {
+    if (!this.isAuthorized() && !isDevelopmentOrTest) {
       const error: AppError = new Error(
         'Authoritative Fayda identity verification is unavailable: official National ID Authority (NIDA) partner credentials (FAYDA_CLIENT_ID / FAYDA_CLIENT_SECRET) are not configured. A demonstration or simulated OTP cannot mark an account as Fayda verified.'
       );
@@ -319,7 +356,7 @@ export class FaydaService {
       throw error;
     }
 
-    let isSandbox = !this.isAuthorized() && process.env.NODE_ENV === 'test';
+    let isSandbox = !this.isAuthorized() && isDevelopmentOrTest;
 
     // If transactionId is provided, strictly validate the active Fayda OTP session
     if (transactionId) {
@@ -359,7 +396,7 @@ export class FaydaService {
       isSandbox = session.isSandbox;
       // Single-use enforcement: Consume the session
       activeFaydaSessions.delete(transactionId);
-    } else if (process.env.NODE_ENV === 'test') {
+    } else if (isDevelopmentOrTest) {
       // Direct mock support for legacy unit test cases
       isSandbox = true;
     } else {
@@ -371,7 +408,7 @@ export class FaydaService {
     const maskedFaydaId = this.maskFaydaId(cleanFin);
 
     // Mark user as verified and save ONLY masked Fayda identifier
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: {
         isVerified: true,
@@ -380,6 +417,25 @@ export class FaydaService {
       },
     });
 
+    const isFullyVerified = updatedUser.isEmailVerified && updatedUser.isVerified;
+    const tokens = {
+      accessToken: generateAccessToken({
+        userId: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role as any,
+        status: updatedUser.status as any,
+        scope: isFullyVerified ? ('FULL' as const) : ('ONBOARDING' as const),
+      }),
+      refreshToken: generateRefreshToken({
+        userId: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role as any,
+        status: updatedUser.status as any,
+        scope: isFullyVerified ? ('FULL' as const) : ('ONBOARDING' as const),
+      }),
+      expiresIn: env.JWT_ACCESS_EXPIRES_IN,
+    };
+
     return {
       verified: true,
       faydaIdNumber: maskedFaydaId,
@@ -387,8 +443,10 @@ export class FaydaService {
       verifiedAt: new Date(),
       status: 'VERIFIED',
       isSandbox,
+      tokens,
     };
   }
+
 
   /**
    * Returns current Fayda verification status for a given user.
