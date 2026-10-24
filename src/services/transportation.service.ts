@@ -299,6 +299,7 @@ export class TransportationService {
         'Identity verification required: Parents must verify their Ethiopian Fayda National ID before requesting school transportation'
       );
       err.statusCode = 403;
+      err.code = 'FAYDA_VERIFICATION_REQUIRED';
       throw err;
     }
 
@@ -307,8 +308,10 @@ export class TransportationService {
         'Email verification required: Please verify your email address before requesting school transportation'
       );
       err.statusCode = 403;
+      err.code = 'EMAIL_VERIFICATION_REQUIRED';
       throw err;
     }
+
 
     // 1. Ownership check: student must belong to the parent
     const student = await prisma.student.findUnique({
@@ -1321,6 +1324,52 @@ export class TransportationService {
   }
 
   /**
+   * Get all payments made by a parent for their transportation agreements.
+   */
+  async getMyPayments(payerId: string) {
+    const payments = await prisma.payment.findMany({
+      where: { payerId },
+      include: {
+        agreement: {
+          include: {
+            student: true,
+            route: true,
+            provider: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phone: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return payments.map((p: any) => ({
+      id: p.id,
+      agreementId: p.agreementId,
+      reference: p.reference,
+      amount: p.amount,
+      currency: p.currency,
+      status: p.status,
+      paymentMethod: p.paymentMethod,
+      receiptUrl: p.receiptUrl ? `/api/transportation/payments/${p.id}/receipt` : null,
+      hasReceipt: Boolean(p.receiptUrl),
+      rejectionReason: p.rejectionReason,
+      notes: p.notes,
+      paidAt: p.paidAt,
+      createdAt: p.createdAt,
+      reviewedAt: p.reviewedAt,
+      studentName: `${p.agreement?.student?.firstName || ''} ${p.agreement?.student?.lastName || ''}`.trim(),
+      routeName: p.agreement?.route?.name || 'School Route',
+      providerName: `${p.agreement?.provider?.firstName || ''} ${p.agreement?.provider?.lastName || ''}`.trim(),
+    }));
+  }
+
+  /**
    * Get active passengers for transport provider manifest.
    */
   async getActivePassengers(providerId: string) {
@@ -1638,12 +1687,14 @@ export class TransportationService {
     if (!provider.isEmailVerified) {
       const err: any = new Error('Email verification required: Please verify your email before publishing routes');
       err.statusCode = 403;
+      err.code = 'EMAIL_VERIFICATION_REQUIRED';
       throw err;
     }
 
-    if (provider.status !== 'ACTIVE') {
+    if (provider.status !== 'ACTIVE' || !provider.isVerified) {
       const err: any = new Error('Account pending administrator approval: Your provider account must be approved by an administrator before publishing transportation routes');
       err.statusCode = 403;
+      err.code = 'ADMIN_APPROVAL_REQUIRED';
       throw err;
     }
 
@@ -1654,6 +1705,13 @@ export class TransportationService {
 
     if (!vehicle) {
       throw new Error('Assigned vehicle not found or does not belong to your account');
+    }
+
+    if (!vehicle.isVerified || vehicle.status !== 'ACTIVE') {
+      const err: any = new Error('Vehicle verification required: The assigned vehicle is pending administrator verification. Only verified vehicles can be assigned to active transit routes.');
+      err.statusCode = 403;
+      err.code = 'VEHICLE_VERIFICATION_REQUIRED';
+      throw err;
     }
 
     const routeCapacity = input.capacity || vehicle.capacity;
@@ -1873,13 +1931,16 @@ export class TransportationService {
       if (!existingTrip.driver.isEmailVerified) {
         const err: any = new Error('Driver email must be verified before starting trips');
         err.statusCode = 403;
+        err.code = 'EMAIL_VERIFICATION_REQUIRED';
         throw err;
       }
       if (existingTrip.driver.status !== 'ACTIVE') {
         const err: any = new Error('Driver account must have active administrator approval before starting trips');
         err.statusCode = 403;
+        err.code = 'ADMIN_APPROVAL_REQUIRED';
         throw err;
       }
+
       if (existingTrip.vehicle.status !== 'ACTIVE') {
         const err: any = new Error('Assigned vehicle is not active or authorized for operation');
         err.statusCode = 400;
