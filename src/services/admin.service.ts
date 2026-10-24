@@ -131,8 +131,23 @@ export class AdminService {
         emailVerifiedAt: true,
         isVerified: true,
         rejectionReason: true,
+        businessName: true,
+        licenseNumber: true,
+        serviceArea: true,
+        registrationStep: true,
         createdAt: true,
         updatedAt: true,
+        accountDocuments: {
+          select: {
+            id: true,
+            documentType: true,
+            documentName: true,
+            fileUrl: true,
+            status: true,
+            rejectionReason: true,
+            createdAt: true,
+          },
+        },
         vehicles: {
           select: {
             id: true,
@@ -215,6 +230,7 @@ export class AdminService {
       data: {
         status: nextStatus,
         rejectionReason,
+        isVerified: decision === 'APPROVE' ? true : user.isVerified,
       },
     });
 
@@ -230,43 +246,90 @@ export class AdminService {
       console.error('[AdminService] Could not send decision email:', err.message);
     }
 
+    if (requesterId) {
+      await this.recordAuditLog(
+        requesterId,
+        decision === 'APPROVE' ? 'APPROVE_USER' : decision === 'REJECT' ? 'REJECT_USER' : 'SUSPEND_USER',
+        'USER',
+        userId,
+        rejectionReason || `Account marked as ${decision}`,
+        userId
+      );
+    }
+
     return sanitizeUser(updated);
   }
 
   /**
    * Platform Overview: Comprehensive system metrics and health indicators.
+   * Directly queries PostgreSQL records for accurate platform reporting.
    */
   async getPlatformStats() {
     const [
       totalUsers,
       usersByRole,
-      activeRoutes,
+      parentsCount,
+      pendingProvidersCount,
+      approvedProvidersCount,
+      pendingBusinessesCount,
+      approvedBusinessesCount,
+      pendingVehiclesCount,
+      approvedVehiclesCount,
       totalVehicles,
+      activeRoutesCount,
+      totalRoutesCount,
       activeAgreements,
-      activeTrips,
+      activeTripsCount,
+      totalTripsCount,
       totalPayments,
+      pendingPaymentsCount,
       safetyIncidents,
-      activeAds,
+      openIncidentsCount,
+      pendingCampaignsCount,
+      activeAdsCount,
+      totalCampaignsCount,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.user.groupBy({
         by: ['role'],
         _count: { id: true },
       }),
-      prisma.route.count({ where: { status: 'ACTIVE' } }),
+      prisma.user.count({ where: { role: 'PARENT' } }),
+      prisma.user.count({ where: { role: 'TRANSPORT_PROVIDER', status: 'PENDING' } }),
+      prisma.user.count({ where: { role: 'TRANSPORT_PROVIDER', status: 'ACTIVE' } }),
+      prisma.user.count({ where: { role: 'BUSINESS', status: 'PENDING' } }),
+      prisma.user.count({ where: { role: 'BUSINESS', status: 'ACTIVE' } }),
+      prisma.vehicle.count({ where: { isVerified: false } }),
+      prisma.vehicle.count({ where: { isVerified: true, status: 'ACTIVE' } }),
       prisma.vehicle.count(),
+      prisma.route.count({ where: { status: 'ACTIVE' } }),
+      prisma.route.count(),
       prisma.transportationAgreement.count({ where: { status: 'ACTIVE' } }),
       prisma.trip.count({ where: { status: 'IN_PROGRESS' } }),
+      prisma.trip.count(),
       prisma.payment.aggregate({
-        where: { status: 'PAID' },
+        where: { status: { in: ['PAID', 'APPROVED'] } },
         _sum: { amount: true },
         _count: { id: true },
+      }),
+      prisma.payment.count({
+        where: {
+          OR: [
+            { status: 'PENDING_REVIEW' },
+            { status: 'PENDING', receiptUrl: { not: null } },
+          ],
+        },
       }),
       prisma.safetyIncident.groupBy({
         by: ['status'],
         _count: { id: true },
       }),
+      prisma.safetyIncident.count({
+        where: { status: { in: ['OPEN', 'UNDER_REVIEW'] } },
+      }),
+      prisma.advertisingCampaign.count({ where: { status: 'PENDING_REVIEW' } }),
       prisma.advertisingCampaign.count({ where: { status: 'ACTIVE' } }),
+      prisma.advertisingCampaign.count(),
     ]);
 
     const roleCounts: Record<string, number> = {};
@@ -279,16 +342,60 @@ export class AdminService {
       incidentCounts[s.status] = s._count.id;
     });
 
+    const pendingTotal =
+      pendingProvidersCount +
+      pendingVehiclesCount +
+      pendingBusinessesCount +
+      pendingCampaignsCount +
+      pendingPaymentsCount;
+
     return {
+      totalUsers,
+      pendingProviders: pendingProvidersCount,
+      approvedProviders: approvedProvidersCount,
+      totalVehicles,
+      activeRoutes: activeRoutesCount,
+      activeTrips: activeTripsCount,
+      metrics: {
+        totalUsers,
+        parents: parentsCount,
+        parentsCount,
+        pendingProviders: pendingProvidersCount,
+        approvedProviders: approvedProvidersCount,
+        pendingBusinesses: pendingBusinessesCount,
+        approvedBusinesses: approvedBusinessesCount,
+        pendingVehicles: pendingVehiclesCount,
+        approvedVehicles: approvedVehiclesCount,
+        totalVehicles,
+        activeRoutes: activeRoutesCount,
+        totalRoutes: totalRoutesCount,
+        activeTrips: activeTripsCount,
+        totalTrips: totalTripsCount,
+        openIncidents: openIncidentsCount,
+        pendingPayments: pendingPaymentsCount,
+        pendingCampaigns: pendingCampaignsCount,
+        activeCampaigns: activeAdsCount,
+        totalCampaigns: totalCampaignsCount,
+        totalPaidVolumeETB: totalPayments._sum.amount || 0,
+        paidTransactionsCount: totalPayments._count.id,
+      },
+      pendingApprovals: {
+        providers: pendingProvidersCount,
+        vehicles: pendingVehiclesCount,
+        businesses: pendingBusinessesCount,
+        campaigns: pendingCampaignsCount,
+        payments: pendingPaymentsCount,
+        total: pendingTotal,
+      },
       users: {
         total: totalUsers,
         byRole: roleCounts,
       },
       transportation: {
-        activeRoutes,
+        activeRoutes: activeRoutesCount,
         totalVehicles,
         activeAgreements,
-        activeTrips,
+        activeTrips: activeTripsCount,
       },
       financials: {
         totalPaidVolumeETB: totalPayments._sum.amount || 0,
@@ -298,9 +405,395 @@ export class AdminService {
         incidents: incidentCounts,
       },
       advertising: {
-        activeCampaigns: activeAds,
+        activeCampaigns: activeAdsCount,
       },
     };
+  }
+
+  /**
+   * Retrieves paginated vehicles with provider information, documents, and route assignments.
+   */
+  async listVehicles(query: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    isVerified?: boolean;
+    search?: string;
+  }) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (typeof query.isVerified === 'boolean') where.isVerified = query.isVerified;
+    if (query.search) {
+      where.OR = [
+        { plateNumber: { contains: query.search, mode: 'insensitive' } },
+        { make: { contains: query.search, mode: 'insensitive' } },
+        { model: { contains: query.search, mode: 'insensitive' } },
+        { provider: { firstName: { contains: query.search, mode: 'insensitive' } } },
+        { provider: { lastName: { contains: query.search, mode: 'insensitive' } } },
+        { provider: { businessName: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, vehicles] = await Promise.all([
+      prisma.vehicle.count({ where }),
+      prisma.vehicle.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          provider: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+              businessName: true,
+              isVerified: true,
+              status: true,
+            },
+          },
+          documents: true,
+          routes: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              origin: true,
+              destinationSchool: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      vehicles,
+    };
+  }
+
+  /**
+   * Administrative decision on a vehicle verification request.
+   */
+  async reviewVehicle(
+    vehicleId: string,
+    decision: 'APPROVE' | 'REJECT',
+    reason?: string,
+    adminId?: string
+  ) {
+    const vehicle = await prisma.vehicle.findUnique({
+      where: { id: vehicleId },
+      include: { provider: true },
+    });
+
+    if (!vehicle) {
+      const error: AppError = new Error('Vehicle record not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (decision === 'REJECT' && (!reason || !reason.trim())) {
+      const error: AppError = new Error('A rejection reason must be provided when rejecting vehicle verification');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const updated = await prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: {
+        isVerified: decision === 'APPROVE',
+        status: decision === 'APPROVE' ? 'ACTIVE' : 'REJECTED',
+      },
+    });
+
+    try {
+      await prisma.notification.create({
+        data: {
+          userId: vehicle.providerId,
+          title: decision === 'APPROVE' ? 'Vehicle Approved & Verified' : 'Vehicle Verification Rejected',
+          message: decision === 'APPROVE'
+            ? `Your vehicle ${vehicle.make} ${vehicle.model} (${vehicle.plateNumber}) has been approved and verified for student transit service.`
+            : `Your vehicle ${vehicle.make} ${vehicle.model} (${vehicle.plateNumber}) was rejected: ${reason?.trim()}`,
+          type: decision === 'APPROVE' ? 'VEHICLE_APPROVED' : 'VEHICLE_REJECTED',
+          entityId: vehicle.id,
+        },
+      });
+    } catch (e: any) {
+      console.warn('[AdminService] Could not send vehicle review notification:', e.message);
+    }
+
+    if (adminId) {
+      await this.recordAuditLog(
+        adminId,
+        decision === 'APPROVE' ? 'APPROVE_VEHICLE' : 'REJECT_VEHICLE',
+        'VEHICLE',
+        vehicleId,
+        reason || `Vehicle marked as ${decision}`,
+        vehicle.providerId
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * Retrieves all platform transit routes with provider and vehicle details.
+   */
+  async listRoutes(query: { status?: string; search?: string; page?: number; limit?: number }) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { origin: { contains: query.search, mode: 'insensitive' } },
+        { destinationSchool: { contains: query.search, mode: 'insensitive' } },
+        { provider: { businessName: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, routes] = await Promise.all([
+      prisma.route.count({ where }),
+      prisma.route.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          provider: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+              businessName: true,
+              isVerified: true,
+            },
+          },
+          vehicle: {
+            select: {
+              id: true,
+              make: true,
+              model: true,
+              plateNumber: true,
+              capacity: true,
+              isVerified: true,
+              status: true,
+            },
+          },
+          stops: { orderBy: { orderIndex: 'asc' } },
+          _count: {
+            select: {
+              agreements: { where: { status: 'ACTIVE' } },
+              requests: { where: { status: 'PENDING' } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return { total, page, limit, totalPages: Math.ceil(total / limit), routes };
+  }
+
+  /**
+   * Retrieves active and scheduled transit trips across the platform.
+   */
+  async listTrips(query: { status?: string; search?: string; page?: number; limit?: number }) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) where.status = query.status;
+    if (query.search) {
+      where.OR = [
+        { route: { name: { contains: query.search, mode: 'insensitive' } } },
+        { vehicle: { plateNumber: { contains: query.search, mode: 'insensitive' } } },
+        { driver: { firstName: { contains: query.search, mode: 'insensitive' } } },
+        { driver: { lastName: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, trips] = await Promise.all([
+      prisma.trip.count({ where }),
+      prisma.trip.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          route: {
+            select: {
+              id: true,
+              name: true,
+              origin: true,
+              destinationSchool: true,
+            },
+          },
+          vehicle: {
+            select: {
+              id: true,
+              make: true,
+              model: true,
+              plateNumber: true,
+            },
+          },
+          driver: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            },
+          },
+          passengers: {
+            include: {
+              student: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  schoolName: true,
+                },
+              },
+            },
+          },
+          locations: {
+            orderBy: { timestamp: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return { total, page, limit, totalPages: Math.ceil(total / limit), trips };
+  }
+
+  /**
+   * Retrieves all advertising campaigns across businesses with performance metrics.
+   */
+  async listCampaigns(query: { status?: string; search?: string; page?: number; limit?: number }) {
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(100, Math.max(1, query.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query.status) where.status = query.status as any;
+    if (query.search) {
+      where.OR = [
+        { title: { contains: query.search, mode: 'insensitive' } },
+        { description: { contains: query.search, mode: 'insensitive' } },
+        { business: { businessName: { contains: query.search, mode: 'insensitive' } } },
+        { business: { email: { contains: query.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, campaigns] = await Promise.all([
+      prisma.advertisingCampaign.count({ where }),
+      prisma.advertisingCampaign.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          business: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              phone: true,
+              businessName: true,
+              isVerified: true,
+              status: true,
+            },
+          },
+          package: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return { total, page, limit, totalPages: Math.ceil(total / limit), campaigns };
+  }
+
+  /**
+   * Reviews an advertising campaign (APPROVE or REJECT).
+   */
+  async reviewCampaign(
+    campaignId: string,
+    decision: 'APPROVE' | 'REJECT',
+    reason?: string,
+    adminId?: string
+  ) {
+    const campaign = await prisma.advertisingCampaign.findUnique({
+      where: { id: campaignId },
+      include: { business: true },
+    });
+
+    if (!campaign) {
+      const error: AppError = new Error('Advertising campaign not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (decision === 'REJECT' && (!reason || !reason.trim())) {
+      const error: AppError = new Error('A rejection reason must be provided when rejecting a campaign');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const nextStatus = decision === 'APPROVE' ? 'ACTIVE' : 'REJECTED';
+    const startDate = decision === 'APPROVE' ? new Date() : campaign.startDate;
+
+    const updated = await prisma.advertisingCampaign.update({
+      where: { id: campaignId },
+      data: {
+        status: nextStatus as any,
+        startDate,
+      },
+    });
+
+    try {
+      await prisma.notification.create({
+        data: {
+          userId: campaign.businessId,
+          title: decision === 'APPROVE' ? 'Campaign Approved & Live' : 'Campaign Review Rejected',
+          message: decision === 'APPROVE'
+            ? `Your advertising campaign "${campaign.title}" has been approved and is now active across SchoolSafe placements.`
+            : `Your advertising campaign "${campaign.title}" was rejected: ${reason?.trim()}`,
+          type: decision === 'APPROVE' ? 'CAMPAIGN_APPROVED' : 'CAMPAIGN_REJECTED',
+          entityId: campaign.id,
+        },
+      });
+    } catch (e: any) {
+      console.warn('[AdminService] Could not send campaign review notification:', e.message);
+    }
+
+    if (adminId) {
+      await this.recordAuditLog(
+        adminId,
+        decision === 'APPROVE' ? 'APPROVE_CAMPAIGN' : 'REJECT_CAMPAIGN',
+        'CAMPAIGN',
+        campaignId,
+        reason || `Campaign marked as ${decision}`,
+        campaign.businessId
+      );
+    }
+
+    return updated;
   }
 
   /**
@@ -535,6 +1028,114 @@ export class AdminService {
 
       return p;
     });
+
+    if (adminId) {
+      await this.recordAuditLog(
+        adminId,
+        decision === 'APPROVE' ? 'APPROVE_PAYMENT' : 'REJECT_PAYMENT',
+        'PAYMENT',
+        paymentId,
+        decision === 'APPROVE' ? (reason || 'Payment approved') : (rejectionReason || undefined),
+        payment.payerId
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * Records an immutable administrative audit log entry.
+   */
+  async recordAuditLog(
+    adminId: string,
+    action: string,
+    entityType: string,
+    entityId: string,
+    details?: string,
+    targetUserId?: string
+  ) {
+    try {
+      return await prisma.auditLog.create({
+        data: {
+          adminId,
+          action,
+          entityType,
+          entityId,
+          details: details || null,
+          targetUserId: targetUserId || null,
+        },
+      });
+    } catch (err: any) {
+      console.warn('[AdminService] Could not write audit log:', err.message);
+    }
+  }
+
+  /**
+   * Lists chronological administrative audit logs.
+   */
+  async listAuditLogs(limit = 50) {
+    return prisma.auditLog.findMany({
+      take: Math.min(100, Math.max(1, limit)),
+      include: {
+        admin: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            role: true,
+          },
+        },
+        targetUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Reviews a provider or business verification document (approve/reject).
+   */
+  async reviewAccountDocument(
+    documentId: string,
+    decision: 'APPROVE' | 'REJECT',
+    reason?: string,
+    adminId?: string
+  ) {
+    const doc = await prisma.accountDocument.findUnique({ where: { id: documentId } });
+    if (!doc) {
+      const error: AppError = new Error('Document not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const updated = await prisma.accountDocument.update({
+      where: { id: documentId },
+      data: {
+        status: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        rejectionReason: decision === 'REJECT' ? reason || 'Document rejected by administrator' : null,
+        reviewedById: adminId || null,
+        reviewedAt: new Date(),
+      },
+    });
+
+    if (adminId) {
+      await this.recordAuditLog(
+        adminId,
+        decision === 'APPROVE' ? 'APPROVE_DOCUMENT' : 'REJECT_DOCUMENT',
+        'DOCUMENT',
+        documentId,
+        reason,
+        doc.userId
+      );
+    }
 
     return updated;
   }
