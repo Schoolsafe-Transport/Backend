@@ -5,7 +5,7 @@ import { initSocketIO } from './socket';
 
 const server = http.createServer(app as any);
 
-// Initialize Socket.IO instance
+
 export const io = initSocketIO(server);
 
 server.listen(env.PORT, () => {

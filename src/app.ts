@@ -16,10 +16,10 @@ app.use(helmet({
 app.use(
   cors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (like mobile apps, server-to-server, curl)
+     
       if (!origin) return callback(null, true);
 
-      // Allow configured CLIENT_URL
+
       if (origin === env.CLIENT_URL) return callback(null, true);
 
       // Allow any localhost or 127.0.0.1 port (e.g. 5173, 5174, 3000)
