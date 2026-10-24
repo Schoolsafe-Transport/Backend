@@ -117,7 +117,7 @@ export class AuthController {
 
   async getMe(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
-      const user = await authService.getProfile(req.user!.id);
+      const user = await authService.getUserProfile(req.user!.id);
       res.status(200).json({
         success: true,
         data: user,
@@ -147,6 +147,86 @@ export class AuthController {
         message: 'Profile updated successfully',
         data: user,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async saveOnboarding(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const user = await authService.saveOnboardingProfile(req.user!.id, req.body);
+      res.status(200).json({
+        success: true,
+        message: 'Onboarding progress saved',
+        data: user,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async uploadDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({
+          success: false,
+          message: 'Document file is required (PDF, JPEG, or PNG up to 10MB)',
+        });
+        return;
+      }
+
+      const { documentType, documentName, expiryDate } = req.body;
+      if (!documentType) {
+        res.status(400).json({
+          success: false,
+          message: 'documentType is required',
+        });
+        return;
+      }
+
+      const doc = await authService.uploadAccountDocument(
+        req.user!.id,
+        file,
+        documentType,
+        documentName,
+        expiryDate
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Document uploaded successfully and queued for review',
+        data: doc,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getMyDocuments(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const docs = await authService.getMyDocuments(req.user!.id);
+      res.status(200).json({
+        success: true,
+        data: docs,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { filePath, mimeType, originalName } = await authService.getDocumentFile(
+        id,
+        req.user!.id,
+        req.user!.role
+      );
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+      res.sendFile(filePath);
     } catch (error) {
       next(error);
     }
