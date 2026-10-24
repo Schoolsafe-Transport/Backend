@@ -28,7 +28,9 @@ const envSchema = z.object({
   SMTP_PORT: z.string().optional(),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
   EMAIL_FROM: z.string().default('noreply@schoolsafe.et'),
+  FRONTEND_URL: z.string().optional(),
 
   // Private File Storage (Receipts & Evidence)
   RECEIPTS_STORAGE_DIR: z.string().optional(),
@@ -41,4 +43,14 @@ if (!parsedEnv.success) {
   process.exit(1);
 }
 
-export const env = parsedEnv.data;
+const resolvedClientUrl = parsedEnv.data.FRONTEND_URL || parsedEnv.data.CLIENT_URL;
+const resolvedSmtpPass = parsedEnv.data.SMTP_PASSWORD || parsedEnv.data.SMTP_PASS;
+
+export const env = {
+  ...parsedEnv.data,
+  CLIENT_URL: resolvedClientUrl,
+  FRONTEND_URL: resolvedClientUrl,
+  SMTP_PASS: resolvedSmtpPass,
+  SMTP_PASSWORD: resolvedSmtpPass,
+};
+
