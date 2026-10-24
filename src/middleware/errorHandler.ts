@@ -4,6 +4,7 @@ import { env } from '../config/env';
 
 export interface AppError extends Error {
   statusCode?: number;
+  code?: string;
   details?: unknown;
 }
 
@@ -17,6 +18,7 @@ export const errorHandler = (
   if (err instanceof ZodError) {
     res.status(400).json({
       success: false,
+      code: 'VALIDATION_ERROR',
       message: 'Validation failed',
       errors: err.errors,
     });
@@ -28,7 +30,10 @@ export const errorHandler = (
 
   res.status(statusCode).json({
     success: false,
+    ...(err.code ? { code: err.code } : {}),
     message,
-    ...(env.NODE_ENV === 'development' && { stack: err.stack, details: err.details }),
+    ...(err.details ? { details: err.details } : {}),
+    ...(env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };
+
