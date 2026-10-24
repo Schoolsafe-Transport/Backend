@@ -36,6 +36,12 @@ router.post(
   (req: any, res: any, next: any) => adminController.reviewApplication(req, res, next)
 );
 
+(router as any).patch(
+  '/applications/:userId/review',
+  validate(applicationDecisionSchema),
+  (req: any, res: any, next: any) => adminController.reviewApplication(req, res, next)
+);
+
 /**
  * @openapi
  * /admin/users:
@@ -118,6 +124,102 @@ router.get('/payments', (req: any, res: any, next: any) =>
  */
 (router as any).patch('/payments/:paymentId/review', (req: any, res: any, next: any) =>
   adminController.reviewPayment(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/audit-logs:
+ *   get:
+ *     summary: "List chronological administrative audit logs"
+ *     tags:
+ *       - Administration
+ */
+router.get('/audit-logs', (req: any, res: any, next: any) =>
+  adminController.listAuditLogs(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/documents/{id}/review:
+ *   patch:
+ *     summary: "Approve or reject a provider/business document"
+ *     tags:
+ *       - Administration
+ */
+(router as any).patch('/documents/:id/review', (req: any, res: any, next: any) =>
+  adminController.reviewAccountDocument(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/vehicles:
+ *   get:
+ *     summary: "List all fleet vehicles with verification status and provider info"
+ *     tags:
+ *       - Administration
+ */
+router.get('/vehicles', (req: any, res: any, next: any) =>
+  adminController.listVehicles(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/vehicles/{vehicleId}/review:
+ *   patch:
+ *     summary: "Approve or reject a vehicle verification request"
+ *     tags:
+ *       - Administration
+ */
+(router as any).patch('/vehicles/:vehicleId/review', (req: any, res: any, next: any) =>
+  adminController.reviewVehicle(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/routes:
+ *   get:
+ *     summary: "List all platform transit routes with stops and agreements"
+ *     tags:
+ *       - Administration
+ */
+router.get('/routes', (req: any, res: any, next: any) =>
+  adminController.listRoutes(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/trips:
+ *   get:
+ *     summary: "List all transit dispatches and live trips"
+ *     tags:
+ *       - Administration
+ */
+router.get('/trips', (req: any, res: any, next: any) =>
+  adminController.listTrips(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/campaigns:
+ *   get:
+ *     summary: "List all advertising campaigns across businesses"
+ *     tags:
+ *       - Administration
+ */
+router.get('/campaigns', (req: any, res: any, next: any) =>
+  adminController.listCampaigns(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/campaigns/{campaignId}/review:
+ *   patch:
+ *     summary: "Approve or reject an advertising campaign"
+ *     tags:
+ *       - Administration
+ */
+(router as any).patch('/campaigns/:campaignId/review', (req: any, res: any, next: any) =>
+  adminController.reviewCampaign(req, res, next)
 );
 
 export default router;
