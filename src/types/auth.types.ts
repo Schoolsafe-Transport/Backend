@@ -17,7 +17,9 @@ export interface JWTPayload {
   email: string;
   role: UserRole;
   status: UserStatus;
+  scope?: 'FULL' | 'ONBOARDING';
 }
+
 
 export interface UserSanitized {
   id: string;
@@ -33,6 +35,11 @@ export interface UserSanitized {
   emailVerifiedAt?: Date | null;
   rejectionReason?: string | null;
   profilePhoto?: string | null;
+  businessName?: string | null;
+  licenseNumber?: string | null;
+  serviceArea?: string | null;
+  registrationStep?: number;
+  accountDocuments?: any[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,7 +57,9 @@ export interface AuthResponse {
 
 export interface AuthenticatedRequest extends Request {
   user?: UserSanitized;
+  tokenScope?: 'FULL' | 'ONBOARDING';
 }
+
 
 export interface RegisterInput {
   email: string;
