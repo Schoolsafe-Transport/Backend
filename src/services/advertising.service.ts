@@ -85,8 +85,17 @@ export class AdvertisingService {
     if (!business.isEmailVerified) {
       const error: AppError = new Error('Email verification required before creating advertising campaigns');
       error.statusCode = 403;
+      error.code = 'EMAIL_VERIFICATION_REQUIRED';
       throw error;
     }
+
+    if (business.status !== 'ACTIVE' || !business.isVerified) {
+      const error: AppError = new Error('Your business account is pending administrator approval. You cannot create campaigns until an administrator verifies and approves your business.');
+      error.statusCode = 403;
+      error.code = 'BUSINESS_APPROVAL_REQUIRED';
+      throw error;
+    }
+
 
     let startDate = new Date();
     let endDate: Date | null = null;
