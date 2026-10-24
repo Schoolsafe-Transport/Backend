@@ -3,6 +3,7 @@ import { authController } from '../controllers/auth.controller';
 import { validate } from '../middleware/validate';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { authRateLimiter, sensitiveRateLimiter } from '../middleware/rateLimiter';
+import { uploadDocumentMiddleware } from '../utils/documentStorage.util';
 import {
   registerSchema,
   loginSchema,
@@ -420,6 +421,37 @@ router.get(
   authenticate as any,
   authorize('TRANSPORT_PROVIDER', 'ADMIN', 'SUPER_ADMIN') as any,
   (req: any, res: any) => authController.providerOnly(req as any, res)
+);
+
+/**
+ * Onboarding profile details save
+ */
+router.post('/onboarding', authenticate as any, (req: any, res: any, next: any) =>
+  authController.saveOnboarding(req, res, next)
+);
+
+/**
+ * Document upload for provider/business verification
+ */
+router.post(
+  '/documents/upload',
+  authenticate as any,
+  uploadDocumentMiddleware.single('document'),
+  (req: any, res: any, next: any) => authController.uploadDocument(req, res, next)
+);
+
+/**
+ * List my uploaded documents
+ */
+router.get('/documents', authenticate as any, (req: any, res: any, next: any) =>
+  authController.getMyDocuments(req, res, next)
+);
+
+/**
+ * Securely retrieve an uploaded document
+ */
+router.get('/documents/:id', authenticate as any, (req: any, res: any, next: any) =>
+  authController.getDocument(req, res, next)
 );
 
 export default router;
