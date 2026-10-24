@@ -9,7 +9,13 @@ let ioInstance: any = null;
 export const initSocketIO = (httpServer: HttpServer): any => {
   const io = new Server(httpServer, {
     cors: {
-      origin: [env.CLIENT_URL, 'http://localhost:3000', 'http://localhost:5173'],
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        if (!origin || origin === env.CLIENT_URL || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          callback(null, true);
+        } else {
+          callback(null, false);
+        }
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
