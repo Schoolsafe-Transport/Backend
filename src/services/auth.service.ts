@@ -311,17 +311,26 @@ export class AuthService {
     }
 
     const { rawToken, sixDigitCode } = await this.generateEmailVerificationToken(user.id);
-    
-    // Asynchronous non-blocking dispatch
-    emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode)
-      .catch(err => console.warn('[AuthService] Resend email dispatch warning:', err.message));
+    const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode);
+
+    if (!dispatchResult.delivered) {
+      return {
+        success: true,
+        delivered: false,
+        message: `Verification code generated: ${sixDigitCode}. Please enter this code in your registration form to verify.`,
+        sixDigitCode,
+        verificationToken: rawToken,
+        verificationUrl: dispatchResult.verificationUrl,
+      };
+    }
 
     return {
       success: true,
       delivered: true,
-      message: 'A fresh 6-digit verification code has been dispatched.',
-      verificationToken: rawToken,
+      message: 'A fresh verification code has been dispatched.',
       sixDigitCode,
+      verificationToken: rawToken,
+      verificationUrl: dispatchResult.verificationUrl,
     };
   }
 
