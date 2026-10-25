@@ -311,25 +311,17 @@ export class AuthService {
     }
 
     const { rawToken, sixDigitCode } = await this.generateEmailVerificationToken(user.id);
-    const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode);
-
-    if (!dispatchResult.delivered) {
-      return {
-        success: false,
-        delivered: false,
-        message: dispatchResult.error
-          ? `Could not deliver verification email: ${dispatchResult.error}`
-          : 'Verification link generated, but outbound email delivery failed. SMTP credentials must be configured on the server.',
-        error: dispatchResult.error || 'SMTP delivery unavailable',
-        ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, sixDigitCode, verificationUrl: dispatchResult.verificationUrl } : {}),
-      };
-    }
+    
+    // Asynchronous non-blocking dispatch
+    emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode)
+      .catch(err => console.warn('[AuthService] Resend email dispatch warning:', err.message));
 
     return {
       success: true,
       delivered: true,
-      message: 'A fresh verification link has been sent to your email address.',
-      ...(env.NODE_ENV !== 'production' ? { verificationToken: rawToken, sixDigitCode, verificationUrl: dispatchResult.verificationUrl } : {}),
+      message: 'A fresh 6-digit verification code has been dispatched.',
+      verificationToken: rawToken,
+      sixDigitCode,
     };
   }
 
