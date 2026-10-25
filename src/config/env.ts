@@ -43,14 +43,16 @@ if (!parsedEnv.success) {
   process.exit(1);
 }
 
-const resolvedClientUrl = parsedEnv.data.FRONTEND_URL || parsedEnv.data.CLIENT_URL;
+const resolvedClientUrl = (parsedEnv.data.CLIENT_URL || parsedEnv.data.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+const resolvedFrontendUrl = (parsedEnv.data.FRONTEND_URL || parsedEnv.data.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
 const resolvedSmtpPass = parsedEnv.data.SMTP_PASSWORD || parsedEnv.data.SMTP_PASS;
 
 export const env = {
   ...parsedEnv.data,
   CLIENT_URL: resolvedClientUrl,
-  FRONTEND_URL: resolvedClientUrl,
+  FRONTEND_URL: resolvedFrontendUrl,
   SMTP_PASS: resolvedSmtpPass,
   SMTP_PASSWORD: resolvedSmtpPass,
 };
+
 

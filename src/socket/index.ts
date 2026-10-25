@@ -10,7 +10,19 @@ export const initSocketIO = (httpServer: HttpServer): any => {
   const io = new Server(httpServer, {
     cors: {
       origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        if (!origin || origin === env.CLIENT_URL || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        if (!origin) return callback(null, true);
+
+        const cleanOrigin = origin.replace(/\/+$/, '');
+        const allowedOrigins = [
+          env.CLIENT_URL?.replace(/\/+$/, ''),
+          env.FRONTEND_URL?.replace(/\/+$/, ''),
+        ].filter(Boolean);
+
+        if (
+          allowedOrigins.includes(cleanOrigin) ||
+          /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+          /^https:\/\/schoolsafe(-[a-z0-9]+)?\.vercel\.app$/.test(cleanOrigin)
+        ) {
           callback(null, true);
         } else {
           callback(null, false);

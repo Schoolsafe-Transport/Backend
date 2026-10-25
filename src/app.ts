@@ -16,14 +16,25 @@ app.use(helmet({
 app.use(
   cors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-     
       if (!origin) return callback(null, true);
 
+      const cleanOrigin = origin.replace(/\/+$/, '');
+      const allowedOrigins = [
+        env.CLIENT_URL?.replace(/\/+$/, ''),
+        env.FRONTEND_URL?.replace(/\/+$/, ''),
+      ].filter(Boolean);
 
-      if (origin === env.CLIENT_URL) return callback(null, true);
+      if (allowedOrigins.includes(cleanOrigin)) {
+        return callback(null, true);
+      }
 
       // Allow any localhost or 127.0.0.1 port (e.g. 5173, 5174, 3000)
       if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+
+      // Allow Vercel deployments (*.vercel.app)
+      if (/^https:\/\/schoolsafe(-[a-z0-9]+)?\.vercel\.app$/.test(cleanOrigin)) {
         return callback(null, true);
       }
 
