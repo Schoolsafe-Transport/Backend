@@ -149,7 +149,7 @@ export class AuthService {
       },
     });
 
-    // Generate single-use email verification token & dispatch email asynchronously
+    // Generate single-use email verification token & dispatch email to recipient
     let verificationToken: string | undefined;
     let sixDigitCode: string | undefined;
     let emailDelivery: { delivered: boolean; error?: string } = { delivered: false };
@@ -158,18 +158,16 @@ export class AuthService {
       verificationToken = generated.rawToken;
       sixDigitCode = generated.sixDigitCode;
 
-      // Asynchronous non-blocking email dispatch so HTTP registration is lightning fast
-      setImmediate(async () => {
-        try {
-          console.log(`[AuthService] Dispatching 6-digit code (${sixDigitCode}) to ${user.email}...`);
-          const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken!, sixDigitCode);
-          console.log(`[AuthService] Email delivery for ${user.email}:`, sendRes.delivered ? 'SUCCESS' : sendRes.error);
-        } catch (dispatchErr: any) {
-          console.warn('[AuthService] Background email dispatch error:', dispatchErr.message);
-        }
-      });
+      console.log(`[AuthService] Dispatching 6-digit verification code to ${user.email}...`);
+      const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken, sixDigitCode);
+      emailDelivery = {
+        delivered: sendRes.delivered,
+        error: sendRes.error,
+      };
+      console.log(`[AuthService] Email delivery for ${user.email}:`, sendRes.delivered ? 'SUCCESS' : sendRes.error);
     } catch (err: any) {
-      console.warn('[AuthService] Could not prepare verification token:', err.message);
+      console.warn('[AuthService] Could not prepare or dispatch verification token:', err.message);
+      emailDelivery = { delivered: false, error: err.message };
     }
 
     return {
@@ -181,7 +179,6 @@ export class AuthService {
       },
       emailDelivery,
       verificationToken,
-      sixDigitCode,
     };
   }
 
@@ -311,14 +308,16 @@ export class AuthService {
     }
 
     const { rawToken, sixDigitCode } = await this.generateEmailVerificationToken(user.id);
+    console.log(`[AuthService] Resending 6-digit verification code to ${user.email}...`);
     const dispatchResult = await emailService.sendVerificationEmail(user.email, user.firstName, rawToken, sixDigitCode);
+    console.log(`[AuthService] Resend email delivery for ${user.email}:`, dispatchResult.delivered ? 'SUCCESS' : dispatchResult.error);
 
     if (!dispatchResult.delivered) {
       return {
-        success: true,
+        success: false,
         delivered: false,
-        message: `Verification code generated: ${sixDigitCode}. Please enter this code in your registration form to verify.`,
-        sixDigitCode,
+        message: 'Could not deliver verification email. Please check your email address or SMTP configuration.',
+        error: dispatchResult.error,
         verificationToken: rawToken,
         verificationUrl: dispatchResult.verificationUrl,
       };
@@ -327,8 +326,7 @@ export class AuthService {
     return {
       success: true,
       delivered: true,
-      message: 'A fresh verification code has been dispatched.',
-      sixDigitCode,
+      message: 'A fresh 6-digit verification code has been dispatched to your email address.',
       verificationToken: rawToken,
       verificationUrl: dispatchResult.verificationUrl,
     };
