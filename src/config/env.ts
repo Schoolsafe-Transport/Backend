@@ -24,12 +24,12 @@ const envSchema = z.object({
   FAYDA_USERINFO_URL: z.string().default('https://esignet.ida.fayda.et/v1/esignet/oidc/userinfo'),
 
   // Email (SMTP for account verification and notification emails)
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.string().optional(),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  SMTP_PASSWORD: z.string().optional(),
-  EMAIL_FROM: z.string().default('noreply@schoolsafe.et'),
+  SMTP_HOST: z.string().default('smtp.gmail.com'),
+  SMTP_PORT: z.string().default('465'),
+  SMTP_USER: z.string().default('rahelnaba716@gmail.com'),
+  SMTP_PASS: z.string().default('odoyizjclhpejyxa'),
+  SMTP_PASSWORD: z.string().default('odoyizjclhpejyxa'),
+  EMAIL_FROM: z.string().default('rahelnaba716@gmail.com'),
   FRONTEND_URL: z.string().optional(),
 
   // Private File Storage (Receipts & Evidence)

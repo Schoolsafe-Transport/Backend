@@ -23,28 +23,32 @@ export class EmailService {
         const cleanPass = env.SMTP_PASS.replace(/\s+/g, '');
 
         if (env.SMTP_HOST.toLowerCase().includes('gmail')) {
-          this.transporter = nodemailer.createTransport({
-            service: 'gmail',
+          this.transporter = (nodemailer.createTransport as any)({
+            host: 'smtp.gmail.com',
+            port: 465,
+            secure: true,
+            family: 4,
             auth: {
               user: env.SMTP_USER,
               pass: cleanPass,
             },
-            connectionTimeout: 4000,
-            greetingTimeout: 4000,
-            socketTimeout: 4000,
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
           });
         } else {
-          this.transporter = nodemailer.createTransport({
+          this.transporter = (nodemailer.createTransport as any)({
             host: env.SMTP_HOST,
             port,
             secure: port === 465,
+            family: 4,
             auth: {
               user: env.SMTP_USER,
               pass: cleanPass,
             },
-            connectionTimeout: 4000,
-            greetingTimeout: 4000,
-            socketTimeout: 4000,
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 15000,
           });
         }
       } catch (err: any) {

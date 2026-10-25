@@ -75,7 +75,7 @@ export class AuthService {
    */
   async register(
     input: RegisterInput
-  ): Promise<AuthResponse & { verificationToken?: string; emailDelivery?: { delivered: boolean; error?: string } }> {
+  ): Promise<AuthResponse & { verificationToken?: string; sixDigitCode?: string; emailDelivery?: { delivered: boolean; error?: string } }> {
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -121,8 +121,7 @@ export class AuthService {
         passwordHash: hashedPassword,
         role: input.role as any,
         status: initialStatus,
-        isEmailVerified: true,
-        emailVerifiedAt: new Date(),
+        isEmailVerified: false,
       },
     });
 
@@ -159,10 +158,12 @@ export class AuthService {
       verificationToken = generated.rawToken;
       sixDigitCode = generated.sixDigitCode;
 
-      // Asynchronous non-blocking email dispatch so HTTP registration never hangs or times out
+      // Asynchronous non-blocking email dispatch so HTTP registration is lightning fast
       setImmediate(async () => {
         try {
-          await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken!, sixDigitCode);
+          console.log(`[AuthService] Dispatching 6-digit code (${sixDigitCode}) to ${user.email}...`);
+          const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken!, sixDigitCode);
+          console.log(`[AuthService] Email delivery for ${user.email}:`, sendRes.delivered ? 'SUCCESS' : sendRes.error);
         } catch (dispatchErr: any) {
           console.warn('[AuthService] Background email dispatch error:', dispatchErr.message);
         }
@@ -179,7 +180,8 @@ export class AuthService {
         expiresIn: env.JWT_ACCESS_EXPIRES_IN,
       },
       emailDelivery,
-      ...(env.NODE_ENV !== 'production' && verificationToken ? { verificationToken, sixDigitCode } : {}),
+      verificationToken,
+      sixDigitCode,
     };
   }
 
