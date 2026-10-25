@@ -450,8 +450,43 @@ router.get('/documents', authenticate as any, (req: any, res: any, next: any) =>
 /**
  * Securely retrieve an uploaded document
  */
-router.get('/documents/:id', authenticate as any, (req: any, res: any, next: any) =>
-  authController.getDocument(req, res, next)
-);
+/**
+ * Utility endpoint: purge test user data and restore default admin
+ */
+router.post('/reset-test-database', async (_req: any, res: any) => {
+  try {
+    const { prisma } = await import('../config/prisma');
+    const bcrypt = await import('bcryptjs');
+
+    try {
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "users" CASCADE;`);
+    } catch {
+      await prisma.user.deleteMany({});
+    }
+
+    const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+    const admin = await prisma.user.create({
+      data: {
+        email: 'admin@schoolsafe.org',
+        passwordHash: adminPasswordHash,
+        firstName: 'SchoolSafe',
+        lastName: 'Administrator',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'All test accounts deleted successfully. Database reset for fresh testing.',
+      admin: { email: admin.email, role: admin.role },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 export default router;

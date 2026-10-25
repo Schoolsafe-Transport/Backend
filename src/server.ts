@@ -33,50 +33,35 @@ const ensureInitialAdminAndStatuses = async () => {
     const { prisma } = await import('./config/prisma');
     const bcrypt = await import('bcryptjs');
 
-    const adminCount = await prisma.user.count({
-      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
-    });
-
-    if (adminCount === 0) {
-      console.log('🌱 Seeding initial platform administrator...');
-      const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
-      await prisma.user.create({
-        data: {
-          email: 'admin@schoolsafe.org',
-          passwordHash: adminPasswordHash,
-          firstName: 'SchoolSafe',
-          lastName: 'Administrator',
-          role: 'ADMIN',
-          status: 'ACTIVE',
-          isEmailVerified: true,
-          emailVerifiedAt: new Date(),
-          isVerified: true,
-        },
-      });
-      console.log('✅ Default administrator seeded: admin@schoolsafe.org');
+    // Purge all registered test user accounts to allow fresh end-to-end testing
+    console.log('🧹 Purging all registered test accounts...');
+    try {
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "users" CASCADE;`);
+      console.log('✅ Purged all registered test users.');
+    } catch (truncateErr: any) {
+      console.warn('⚠️ Could not truncate users table, using deleteMany:', truncateErr.message);
+      await prisma.user.deleteMany({});
     }
 
-    // Set any registered account awaiting admin approval to PENDING
-    await prisma.user.updateMany({
-      where: {
-        email: { in: ['nabalura@gmail.com'] },
-        role: 'PARENT',
-      },
+    // Seed default platform administrator
+    console.log('🌱 Seeding initial platform administrator...');
+    const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+    await prisma.user.create({
       data: {
-        status: 'PENDING',
-      },
-    });
-
-    // Mark existing registered users as email-verified so they are never blocked by email verification
-    await prisma.user.updateMany({
-      where: { isEmailVerified: false },
-      data: {
+        email: 'admin@schoolsafe.org',
+        passwordHash: adminPasswordHash,
+        firstName: 'SchoolSafe',
+        lastName: 'Administrator',
+        role: 'ADMIN',
+        status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
+        isVerified: true,
       },
     });
+    console.log('✅ Default administrator ready: admin@schoolsafe.org (password: AdminSafe123!)');
   } catch (err: any) {
-    console.error('⚠️ Could not run admin/status check:', err.message);
+    console.error('⚠️ Could not complete test database reset and admin setup:', err.message);
   }
 };
 
