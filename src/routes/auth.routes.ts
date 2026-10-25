@@ -458,15 +458,23 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
     const { prisma } = await import('../config/prisma');
     const bcrypt = await import('bcryptjs');
 
-    try {
-      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "users" CASCADE;`);
-    } catch {
-      await prisma.user.deleteMany({});
-    }
+    await prisma.user.deleteMany({
+      where: {
+        email: { not: 'admin@schoolsafe.org' },
+      },
+    });
 
     const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
-    const admin = await prisma.user.create({
-      data: {
+    const admin = await prisma.user.upsert({
+      where: { email: 'admin@schoolsafe.org' },
+      update: {
+        passwordHash: adminPasswordHash,
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+      create: {
         email: 'admin@schoolsafe.org',
         passwordHash: adminPasswordHash,
         firstName: 'SchoolSafe',
