@@ -97,7 +97,7 @@ export class AdminService {
    */
   async listApplications(query: { role?: string; status?: string; search?: string }) {
     const where: any = {
-      role: { in: ['TRANSPORT_PROVIDER', 'DRIVER', 'BUSINESS'] },
+      role: { in: ['PARENT', 'TRANSPORT_PROVIDER', 'DRIVER', 'BUSINESS', 'STUDENT'] },
     };
 
     if (query.role) {

@@ -26,17 +26,63 @@ const runDatabaseMigrations = () => {
 
 runDatabaseMigrations();
 
+// Seed default administrator if none exists & ensure unapproved accounts are PENDING
+const ensureInitialAdminAndStatuses = async () => {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    const { prisma } = await import('./config/prisma');
+    const bcrypt = await import('bcryptjs');
+
+    const adminCount = await prisma.user.count({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
+    });
+
+    if (adminCount === 0) {
+      console.log('🌱 Seeding initial platform administrator...');
+      const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+      await prisma.user.create({
+        data: {
+          email: 'admin@schoolsafe.org',
+          passwordHash: adminPasswordHash,
+          firstName: 'SchoolSafe',
+          lastName: 'Administrator',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          isEmailVerified: true,
+          emailVerifiedAt: new Date(),
+          isVerified: true,
+        },
+      });
+      console.log('✅ Default administrator seeded: admin@schoolsafe.org');
+    }
+
+    // Set any registered account awaiting admin approval to PENDING
+    await prisma.user.updateMany({
+      where: {
+        email: { in: ['nabalura@gmail.com'] },
+        role: 'PARENT',
+      },
+      data: {
+        status: 'PENDING',
+      },
+    });
+  } catch (err: any) {
+    console.error('⚠️ Could not run admin/status check:', err.message);
+  }
+};
+
 const server = http.createServer(app as any);
 
 export const io = initSocketIO(server);
 
-server.listen(env.PORT, () => {
+server.listen(env.PORT, async () => {
   console.log(`===============================================`);
   console.log(`🚀 SchoolSafe Server running on port ${env.PORT}`);
   console.log(`📡 Environment: ${env.NODE_ENV}`);
   console.log(`📚 Swagger Docs: http://localhost:${env.PORT}/api/docs`);
   console.log(`🩺 Health Check: http://localhost:${env.PORT}/api/health`);
   console.log(`===============================================`);
+  await ensureInitialAdminAndStatuses();
 });
 
 // Graceful Shutdown Handling

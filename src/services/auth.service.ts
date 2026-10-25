@@ -109,11 +109,8 @@ export class AuthService {
 
     const hashedPassword = await hashPassword(input.password);
 
-    // Initial status: ACTIVE for parents, students; PENDING administrator approval for drivers, providers, and businesses
-    const initialStatus =
-      input.role === 'DRIVER' || input.role === 'TRANSPORT_PROVIDER' || input.role === 'BUSINESS'
-        ? 'PENDING'
-        : 'ACTIVE';
+    // Initial status: All publicly registered users require administrator approval
+    const initialStatus = 'PENDING';
 
     const user = await prisma.user.create({
       data: {
