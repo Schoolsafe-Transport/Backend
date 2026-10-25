@@ -66,6 +66,15 @@ const ensureInitialAdminAndStatuses = async () => {
         status: 'PENDING',
       },
     });
+
+    // Mark existing registered users as email-verified so they are never blocked by email verification
+    await prisma.user.updateMany({
+      where: { isEmailVerified: false },
+      data: {
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+      },
+    });
   } catch (err: any) {
     console.error('⚠️ Could not run admin/status check:', err.message);
   }

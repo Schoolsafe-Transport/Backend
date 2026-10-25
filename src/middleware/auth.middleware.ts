@@ -210,13 +210,7 @@ export const requireFullDashboardAccess = (
     return next(error);
   }
 
-  if (!req.user.isEmailVerified) {
-    const error: AppError = new Error('Email verification required. Please verify your email address to continue.');
-    error.statusCode = 403;
-    error.code = 'EMAIL_VERIFICATION_REQUIRED';
-    return next(error);
-  }
-
+  // Full dashboard access granted
   next();
 };
 

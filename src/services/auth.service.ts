@@ -121,8 +121,8 @@ export class AuthService {
         passwordHash: hashedPassword,
         role: input.role as any,
         status: initialStatus,
-        isEmailVerified: false,
-        emailVerifiedAt: null,
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
       },
     });
 
@@ -131,7 +131,7 @@ export class AuthService {
       email: user.email,
       role: user.role as any,
       status: user.status as any,
-      scope: 'ONBOARDING' as const,
+      scope: 'FULL' as const,
     };
 
 
@@ -365,27 +365,6 @@ export class AuthService {
       throw error;
     }
 
-    // TASK 3: Deny normal login if email is not verified
-    if (!user.isEmailVerified) {
-      const onboardingToken = generateAccessToken({
-        userId: user.id,
-        email: user.email,
-        role: user.role as any,
-        status: user.status as any,
-        scope: 'ONBOARDING',
-      });
-
-      const error: AppError = new Error('Email verification required. Please verify your email address to continue.');
-      error.statusCode = 403;
-      error.code = 'EMAIL_VERIFICATION_REQUIRED';
-      error.details = {
-        code: 'EMAIL_VERIFICATION_REQUIRED',
-        email: user.email,
-        user: sanitizeUser(user),
-        onboardingToken,
-      };
-      throw error;
-    }
 
 
     const jwtPayload = {
