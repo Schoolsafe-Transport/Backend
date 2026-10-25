@@ -59,6 +59,9 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // API Root Router with General Rate Limiting
 app.use('/api', generalRateLimiter, apiRoutes);
 
+// Fallback: alias API routes directly on root in case clients omit the /api prefix
+app.use('/', generalRateLimiter, apiRoutes);
+
 // Root Index Redirect to API docs
 app.get('/', (_req: Request, res: Response) => {
   res.json({
