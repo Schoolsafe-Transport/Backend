@@ -29,6 +29,9 @@ export class EmailService {
               user: env.SMTP_USER,
               pass: cleanPass,
             },
+            connectionTimeout: 4000,
+            greetingTimeout: 4000,
+            socketTimeout: 4000,
           });
         } else {
           this.transporter = nodemailer.createTransport({
@@ -39,6 +42,9 @@ export class EmailService {
               user: env.SMTP_USER,
               pass: cleanPass,
             },
+            connectionTimeout: 4000,
+            greetingTimeout: 4000,
+            socketTimeout: 4000,
           });
         }
       } catch (err: any) {

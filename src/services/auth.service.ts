@@ -150,7 +150,7 @@ export class AuthService {
       },
     });
 
-    // Generate single-use email verification token & dispatch email
+    // Generate single-use email verification token & dispatch email asynchronously
     let verificationToken: string | undefined;
     let sixDigitCode: string | undefined;
     let emailDelivery: { delivered: boolean; error?: string } = { delivered: false };
@@ -158,14 +158,17 @@ export class AuthService {
       const generated = await this.generateEmailVerificationToken(user.id);
       verificationToken = generated.rawToken;
       sixDigitCode = generated.sixDigitCode;
-      const sendRes = await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken, sixDigitCode);
-      emailDelivery = {
-        delivered: sendRes.delivered,
-        ...(sendRes.error ? { error: sendRes.error } : {}),
-      };
+
+      // Asynchronous non-blocking email dispatch so HTTP registration never hangs or times out
+      setImmediate(async () => {
+        try {
+          await emailService.sendVerificationEmail(user.email, user.firstName, verificationToken!, sixDigitCode);
+        } catch (dispatchErr: any) {
+          console.warn('[AuthService] Background email dispatch error:', dispatchErr.message);
+        }
+      });
     } catch (err: any) {
-      console.error('[AuthService] Could not send verification email on registration:', err.message);
-      emailDelivery = { delivered: false, error: err.message };
+      console.warn('[AuthService] Could not prepare verification token:', err.message);
     }
 
     return {
