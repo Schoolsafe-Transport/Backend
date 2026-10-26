@@ -76,21 +76,12 @@ export class AuthService {
   async register(
     input: RegisterInput
   ): Promise<AuthResponse & { verificationToken?: string; sixDigitCode?: string; emailDelivery?: { delivered: boolean; error?: string } }> {
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: input.email },
-          ...(input.phone ? [{ phone: input.phone }] : []),
-        ],
-      },
+    const existingUser = await prisma.user.findUnique({
+      where: { email: input.email },
     });
 
     if (existingUser) {
-      const error: AppError = new Error(
-        existingUser.email === input.email
-          ? 'An account with this email address already exists'
-          : 'An account with this phone number already exists'
-      );
+      const error: AppError = new Error('An account with this email address already exists');
       error.statusCode = 409;
       throw error;
     }
@@ -652,16 +643,7 @@ export class AuthService {
       throw error;
     }
 
-    if (input.phone && input.phone !== user.phone) {
-      const existingPhone = await prisma.user.findFirst({
-        where: { phone: input.phone, NOT: { id: userId } },
-      });
-      if (existingPhone) {
-        const error: AppError = new Error('Phone number is already associated with another account');
-        error.statusCode = 409;
-        throw error;
-      }
-    }
+
 
     const updated = await prisma.user.update({
       where: { id: userId },

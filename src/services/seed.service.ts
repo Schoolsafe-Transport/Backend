@@ -7,35 +7,17 @@ import bcrypt from 'bcryptjs';
  */
 export async function purgeMockExampleData(dbClient?: any) {
   const db = dbClient || prisma;
-  console.log('🧹 Purging all mock example data from database...');
+
+  // Drop phone unique constraint so parents/users can register with personal/shared mobile numbers
+  try {
+    await db.$executeRawUnsafe('DROP INDEX IF EXISTS "users_phone_key" CASCADE;');
+  } catch (_e) {
+    // Ignore if not present or unsupported
+  }
 
   try {
-    await db.advertisementEvent.deleteMany({});
-    await db.advertisingCampaign.deleteMany({});
-    await db.advertisingPackage.deleteMany({});
-    await db.safetyIncident.deleteMany({});
-    await db.boardingEvent.deleteMany({});
-    await db.tripPassenger.deleteMany({});
-    await db.tripLocation.deleteMany({});
-    await db.trip.deleteMany({});
-    await db.studentTransportPass.deleteMany({});
-    await db.payment.deleteMany({});
-    await db.transportationAgreement.deleteMany({});
-    await db.transportationOffer.deleteMany({});
-    await db.transportationRequest.deleteMany({});
-    await db.routeStop.deleteMany({});
-    await db.route.deleteMany({});
-    await db.vehicleDocument.deleteMany({});
-    await db.vehicle.deleteMany({});
-    await db.authorizedPickupPerson.deleteMany({});
-    await db.student.deleteMany({});
-    await db.rating.deleteMany({});
-    await db.notification.deleteMany({});
-    await db.auditLog.deleteMany({});
-    await db.accountDocument.deleteMany({});
-
-    // Delete all users whose email ends with @schoolsafe.org or contains mock domains
-    const result = await db.user.deleteMany({
+    // Find all mock accounts
+    const mockUsers = await db.user.findMany({
       where: {
         OR: [
           { email: { endsWith: '@schoolsafe.org' } },
@@ -43,9 +25,33 @@ export async function purgeMockExampleData(dbClient?: any) {
           { email: { contains: 'example.com' } },
         ],
       },
+      select: { id: true },
     });
 
-    console.log(`✅ Removed ${result.count} mock example accounts. Only real users remain.`);
+    if (mockUsers.length === 0) {
+      return;
+    }
+
+    console.log(`🧹 Found ${mockUsers.length} mock accounts. Purging mock data...`);
+    const mockUserIds = mockUsers.map((u: any) => u.id);
+
+    await db.notification.deleteMany({ where: { userId: { in: mockUserIds } } });
+    await db.auditLog.deleteMany({
+      where: { OR: [{ initiatedById: { in: mockUserIds } }, { targetUserId: { in: mockUserIds } }] },
+    });
+    await db.accountDocument.deleteMany({ where: { userId: { in: mockUserIds } } });
+    await db.rating.deleteMany({
+      where: { OR: [{ raterId: { in: mockUserIds } }, { rateeId: { in: mockUserIds } }] },
+    });
+    await db.student.deleteMany({ where: { parentId: { in: mockUserIds } } });
+    await db.vehicle.deleteMany({ where: { providerId: { in: mockUserIds } } });
+    await db.route.deleteMany({ where: { providerId: { in: mockUserIds } } });
+
+    const result = await db.user.deleteMany({
+      where: { id: { in: mockUserIds } },
+    });
+
+    console.log(`✅ Removed ${result.count} mock example accounts. Real data preserved.`);
   } catch (err: any) {
     console.error('⚠️ Error purging mock example data:', err.message);
   }
