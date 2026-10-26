@@ -231,8 +231,11 @@ export class EmailService {
 
     // 3. Vercel HTTPS Relay (Port 443 — Bypasses cloud SMTP port blocks on Render)
     try {
-      const relayUrl = `${env.CLIENT_URL || 'https://schoolsafe-eight.vercel.app'}/api/send-email`;
-      console.log(`[EmailService] Attempting dispatch via Vercel HTTPS Relay to ${toEmail}...`);
+      const relayBase = (env.CLIENT_URL && env.CLIENT_URL.startsWith('https://'))
+        ? env.CLIENT_URL
+        : 'https://schoolsafe-eight.vercel.app';
+      const relayUrl = `${relayBase.replace(/\/+$/, '')}/api/send-email`;
+      console.log(`[EmailService] Attempting dispatch via Vercel HTTPS Relay to ${toEmail} via ${relayUrl}...`);
       const relayRes = await fetch(relayUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
