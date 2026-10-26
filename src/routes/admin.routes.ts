@@ -222,4 +222,16 @@ router.get('/campaigns', (req: any, res: any, next: any) =>
   adminController.reviewCampaign(req, res, next)
 );
 
+/**
+ * @openapi
+ * /admin/seed-baseline:
+ *   post:
+ *     summary: "Populate baseline operational data (Admin only)"
+ *     tags:
+ *       - Administration
+ */
+router.post('/seed-baseline', (req: any, res: any, next: any) =>
+  adminController.seedBaseline(req, res, next)
+);
+
 export default router;

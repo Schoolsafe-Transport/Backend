@@ -858,7 +858,13 @@ export class AdminService {
 
     const where: any = {};
     if (query.status) {
-      where.status = query.status;
+      if (query.status === 'PENDING') {
+        where.status = { in: ['PENDING', 'PENDING_REVIEW'] };
+      } else if (query.status === 'APPROVED') {
+        where.status = { in: ['APPROVED', 'PAID'] };
+      } else {
+        where.status = query.status;
+      }
     }
 
     if (query.search) {

@@ -325,6 +325,20 @@ export class AdminController {
       next(error);
     }
   }
+
+  async seedBaseline(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { seedBaselineOperationalData } = await import('../services/seed.service');
+      const { prisma } = await import('../config/prisma');
+      await seedBaselineOperationalData(prisma);
+      res.status(200).json({
+        success: true,
+        message: 'Operational baseline data populated successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();

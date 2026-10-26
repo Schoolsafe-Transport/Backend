@@ -31,46 +31,49 @@ const ensureInitialAdminAndStatuses = async () => {
   if (process.env.NODE_ENV === 'test') return;
   try {
     const { prisma } = await import('./config/prisma');
-    const bcrypt = await import('bcryptjs');
+    const { seedBaselineOperationalData } = await import('./services/seed.service');
 
-    // Purge all registered test user accounts to allow fresh end-to-end testing
-    console.log('🧹 Purging all registered test accounts...');
-    try {
-      await prisma.$executeRawUnsafe(`TRUNCATE TABLE "users" CASCADE;`);
-      console.log('✅ Purged all registered test users.');
-    } catch (truncateErr: any) {
-      console.warn('⚠️ Could not truncate users table, using deleteMany:', truncateErr.message);
-      await prisma.user.deleteMany({});
-    }
-
-    // Seed default platform administrator
-    console.log('🌱 Seeding initial platform administrator...');
-    const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
-    await prisma.user.upsert({
-      where: { email: 'rachelberhane716@gmail.com' },
-      update: {
-        passwordHash: adminPasswordHash,
-        role: 'ADMIN',
-        status: 'ACTIVE',
-        isEmailVerified: true,
-        emailVerifiedAt: new Date(),
-        isVerified: true,
-      },
-      create: {
-        email: 'rachelberhane716@gmail.com',
-        passwordHash: adminPasswordHash,
-        firstName: 'Rachel',
-        lastName: 'Berhane',
-        role: 'ADMIN',
-        status: 'ACTIVE',
-        isEmailVerified: true,
-        emailVerifiedAt: new Date(),
-        isVerified: true,
-      },
+    // Check if the platform has operational baseline data
+    const providerCount = await prisma.user.count({
+      where: { role: 'TRANSPORT_PROVIDER' },
     });
-    console.log('✅ Administrator ready: rachelberhane716@gmail.com (password: naba1219@Ra)');
+
+    if (providerCount === 0) {
+      console.log('🌱 No operational providers detected. Running initial baseline data seed...');
+      await seedBaselineOperationalData(prisma);
+    } else {
+      // Ensure the administrator account credentials are always fresh & active
+      const bcrypt = await import('bcryptjs');
+      const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
+      await prisma.user.upsert({
+        where: { email: 'rachelberhane716@gmail.com' },
+        update: {
+          passwordHash: adminPasswordHash,
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          isEmailVerified: true,
+          emailVerifiedAt: new Date(),
+          isVerified: true,
+          firstName: 'Rachel',
+          lastName: 'Berhane',
+        },
+        create: {
+          email: 'rachelberhane716@gmail.com',
+          passwordHash: adminPasswordHash,
+          firstName: 'Rachel',
+          lastName: 'Berhane',
+          phone: '+251942027483',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          isEmailVerified: true,
+          emailVerifiedAt: new Date(),
+          isVerified: true,
+        },
+      });
+      console.log('✅ Administrator ready: rachelberhane716@gmail.com (password: naba1219@Ra)');
+    }
   } catch (err: any) {
-    console.error('⚠️ Could not complete test database reset and admin setup:', err.message);
+    console.error('⚠️ Could not complete admin setup and baseline seed:', err.message);
   }
 };
 
