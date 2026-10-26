@@ -218,11 +218,32 @@ export class AuthController {
   async getDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      const { filePath, mimeType, originalName, fallbackHtml } = await authService.getDocumentFile(
-        id,
-        req.user!.id,
-        req.user!.role
-      );
+      const format = req.query.format as string;
+      const { filePath, buffer, svgContent, mimeType, originalName, fallbackHtml } =
+        await authService.getDocumentFile(id, req.user!.id, req.user!.role);
+
+      // If client requests pure image format (e.g. for standalone image viewing or embedding)
+      if (format === 'image' || format === 'svg') {
+        if (buffer && mimeType?.startsWith('image/')) {
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+          res.send(buffer);
+          return;
+        }
+
+        res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+        res.setHeader('Content-Disposition', `inline; filename="${originalName.replace(/\.[^.]+$/, '')}.svg"`);
+        res.send(svgContent);
+        return;
+      }
+
+      // If physical file exists and request is not a browser page visit
+      if (filePath && req.query.view !== 'html' && !req.headers.accept?.includes('text/html')) {
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+        res.sendFile(filePath);
+        return;
+      }
 
       if (fallbackHtml) {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -232,7 +253,13 @@ export class AuthController {
 
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
-      res.sendFile(filePath!);
+      if (filePath) {
+        res.sendFile(filePath);
+      } else if (buffer) {
+        res.send(buffer);
+      } else {
+        res.status(200).send(fallbackHtml);
+      }
     } catch (error) {
       next(error);
     }

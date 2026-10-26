@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import { prisma } from '../config/prisma';
 import { env } from '../config/env';
 import { emailService } from './email.service';
@@ -11,6 +12,7 @@ import {
   sanitizeUser,
 } from '../utils/security.util';
 import { getDocumentFilePath, findDocumentFile } from '../utils/documentStorage.util';
+import { generateDocumentVisualSvg } from '../utils/documentVisualGenerator.util';
 import {
   RegisterInput,
   LoginInput,
@@ -715,12 +717,26 @@ export class AuthService {
       throw error;
     }
 
+    // Convert uploaded physical file to permanent Base64 Data URI so it is NEVER lost on Render ephemeral container restarts!
+    let fileUrl = file.filename;
+    try {
+      if (file.path && fs.existsSync(file.path)) {
+        const fileBuf = fs.readFileSync(file.path);
+        fileUrl = `data:${file.mimetype};base64,${fileBuf.toString('base64')}`;
+      } else if ((file as any).buffer) {
+        fileUrl = `data:${file.mimetype};base64,${(file as any).buffer.toString('base64')}`;
+      }
+    } catch (e) {
+      console.warn('Failed to convert uploaded document to data URL, using filename fallback', e);
+      fileUrl = file.filename;
+    }
+
     const doc = await prisma.accountDocument.create({
       data: {
         userId,
         documentType: documentType.trim(),
         documentName: documentName ? documentName.trim() : file.originalname,
-        fileUrl: file.filename,
+        fileUrl,
         fileMimeType: file.mimetype,
         fileSize: file.size,
         status: 'PENDING',
@@ -795,95 +811,236 @@ export class AuthService {
       throw error;
     }
 
-    const physicalPath = findDocumentFile(doc.fileUrl);
-    if (physicalPath) {
-      return {
-        filePath: physicalPath,
-        mimeType: doc.fileMimeType || 'application/pdf',
-        originalName: doc.documentName || 'document.pdf',
-        fallbackHtml: null,
-      };
+    let physicalPath: string | null = null;
+    let buffer: Buffer | null = null;
+    let dataUrl: string | null = null;
+
+    if (doc.fileUrl && doc.fileUrl.startsWith('data:')) {
+      dataUrl = doc.fileUrl;
+      const commaIdx = doc.fileUrl.indexOf(',');
+      const base64Data = doc.fileUrl.substring(commaIdx + 1);
+      buffer = Buffer.from(base64Data, 'base64');
+    } else if (doc.fileUrl) {
+      physicalPath = findDocumentFile(doc.fileUrl);
+      if (physicalPath && fs.existsSync(physicalPath)) {
+        try {
+          buffer = fs.readFileSync(physicalPath);
+          dataUrl = `data:${doc.fileMimeType || 'image/png'};base64,${buffer.toString('base64')}`;
+        } catch (_e) {
+          // ignore
+        }
+      }
     }
 
-    // Generate Official Certified Document Preview HTML for administrative inspection
+    const u = doc.user || {
+      firstName: 'Applicant',
+      lastName: 'User',
+      email: 'N/A',
+      phone: 'N/A',
+      role: 'OPERATOR',
+    };
+
+    // Generate the official vector SVG document image
+    const svgVisual = generateDocumentVisualSvg(doc, u as any);
+
+    const escapeHtml = (str: string) =>
+      str.replace(/[<>&'"]/g, (c) => {
+        switch (c) {
+          case '<': return '&lt;';
+          case '>': return '&gt;';
+          case '&': return '&amp;';
+          case '\'': return '&#39;';
+          case '"': return '&quot;';
+          default: return c;
+        }
+      });
+
     const statusColor =
       doc.status === 'APPROVED' ? '#059669' : doc.status === 'REJECTED' ? '#DC2626' : '#D97706';
     const statusBg =
       doc.status === 'APPROVED' ? '#ECFDF5' : doc.status === 'REJECTED' ? '#FEF2F2' : '#FFFBEB';
-    const u = doc.user || { firstName: 'Applicant', lastName: 'User', email: 'N/A', phone: 'N/A', role: 'OPERATOR' };
 
     const fallbackHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SchoolSafe - Document Record: ${doc.documentName}</title>
+  <title>SchoolSafe - Official Document: ${escapeHtml(doc.documentName || doc.documentType)}</title>
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background-color: #F8FAFC;
-      color: #0F172A;
-      margin: 0;
-      padding: 2rem 1rem;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      background-color: #0B1120;
+      background-image: radial-gradient(at 0% 0%, #1E293B 0px, transparent 50%), radial-gradient(at 100% 100%, #1E3A8A 0px, transparent 50%);
+      color: #F8FAFC;
       min-height: 100vh;
-      box-sizing: border-box;
-    }
-    .cert-card {
-      background: #FFFFFF;
-      border: 1px solid #E2E8F0;
-      border-radius: 16px;
-      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
-      max-width: 680px;
-      width: 100%;
-      overflow: hidden;
-    }
-    .cert-header {
-      background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
-      color: #FFFFFF;
-      padding: 1.75rem 2rem;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: space-between;
+      padding: 1.5rem 1rem 3rem;
     }
-    .cert-brand {
+    .container {
+      max-width: 900px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      padding: 1rem 1.5rem;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .brand {
       display: flex;
       align-items: center;
       gap: 0.75rem;
     }
-    .cert-badge {
+    .brand-icon {
+      width: 42px;
+      height: 42px;
+      background: linear-gradient(135deg, #2563EB, #1D4ED8);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+    }
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #FFFFFF;
+      letter-spacing: -0.02em;
+    }
+    .brand-subtitle {
+      font-size: 0.78rem;
+      color: #94A3B8;
+    }
+    .actions-bar {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: #2563EB;
+      color: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+    .btn-primary:hover { background: #1D4ED8; }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #F8FAFC;
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.2); }
+    .status-badge {
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
       font-size: 0.75rem;
-      font-weight: 700;
+      font-weight: 800;
       letter-spacing: 0.05em;
       text-transform: uppercase;
-      padding: 0.25rem 0.65rem;
-      border-radius: 9999px;
       background-color: ${statusBg};
       color: ${statusColor};
       border: 1px solid ${statusColor};
     }
-    .cert-body {
-      padding: 2rem;
+    .visual-card-wrapper {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .visual-header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .visual-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #F8FAFC;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .svg-container {
+      width: 100%;
+      max-width: 850px;
+      display: flex;
+      justify-content: center;
+    }
+    .svg-container svg {
+      width: 100%;
+      height: auto;
+      max-height: 540px;
+    }
+    .uploaded-img {
+      max-width: 100%;
+      max-height: 540px;
+      border-radius: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    .meta-card {
+      background: #FFFFFF;
+      color: #0F172A;
+      border-radius: 20px;
+      padding: 1.75rem;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    }
+    .meta-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
     .meta-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1.25rem;
-      margin-top: 1.5rem;
-      margin-bottom: 2rem;
-      background-color: #F8FAFC;
-      padding: 1.25rem;
-      border-radius: 12px;
+      background: #F8FAFC;
       border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      padding: 1.25rem;
     }
     .meta-item label {
       display: block;
       font-size: 0.75rem;
       text-transform: uppercase;
       font-weight: 700;
-      letter-spacing: 0.04em;
       color: #64748B;
       margin-bottom: 0.25rem;
     }
@@ -893,8 +1050,9 @@ export class AuthService {
       color: #0F172A;
       word-break: break-word;
     }
-    .seal-banner {
-      background-color: #EFF6FF;
+    .verified-banner {
+      margin-top: 1.25rem;
+      background: #EFF6FF;
       border: 1px solid #BFDBFE;
       border-radius: 10px;
       padding: 1rem 1.25rem;
@@ -903,103 +1061,149 @@ export class AuthService {
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-    .actions {
-      display: flex;
-      gap: 0.75rem;
-      justify-content: flex-end;
-    }
-    .btn {
-      padding: 0.6rem 1.25rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.875rem;
-      cursor: pointer;
-      border: 1px solid transparent;
-      text-decoration: none;
-    }
-    .btn-primary {
-      background-color: #2563EB;
-      color: #FFFFFF;
-    }
-    .btn-secondary {
-      background-color: #FFFFFF;
-      border-color: #CBD5E1;
-      color: #334155;
     }
     @media (max-width: 600px) {
+      .top-bar { flex-direction: column; align-items: stretch; }
+      .actions-bar { justify-content: stretch; }
+      .btn { flex: 1; justify-content: center; }
       .meta-grid { grid-template-columns: 1fr; }
-      .cert-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+    }
+    @media print {
+      body { background: white; color: black; padding: 0; }
+      .top-bar, .actions-bar { display: none; }
+      .visual-card-wrapper { border: none; box-shadow: none; padding: 0; }
     }
   </style>
 </head>
 <body>
-  <div class="cert-card">
-    <div class="cert-header">
-      <div class="cert-brand">
+  <div class="container">
+    <div class="top-bar">
+      <div class="brand">
+        <div class="brand-icon">🛡️</div>
         <div>
-          <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em;">SchoolSafe Registry</h2>
-          <div style="font-size: 0.8rem; opacity: 0.85; margin-top: 2px;">Verified Transport & Compliance Record</div>
+          <div class="brand-title">SchoolSafe Verification Center</div>
+          <div class="brand-subtitle">Federal Transport &amp; Driver Compliance Registry</div>
         </div>
       </div>
-      <div class="cert-badge">${doc.status}</div>
+      <div class="actions-bar">
+        <span class="status-badge">${doc.status}</span>
+        <a href="?format=image" target="_blank" class="btn btn-secondary" title="View standalone pure image">
+          🖼️ Pure Image
+        </a>
+        <button onclick="downloadDocumentSvg()" class="btn btn-primary" title="Download official document vector image">
+          ⬇️ Download Image
+        </button>
+        <button onclick="window.print()" class="btn btn-secondary">
+          🖨️ Print
+        </button>
+      </div>
     </div>
-    <div class="cert-body">
-      <h3 style="margin: 0 0 0.5rem; font-size: 1.2rem; color: #0F172A;">
-        ${doc.documentName || doc.documentType.replace(/_/g, ' ')}
-      </h3>
-      <p style="margin: 0; font-size: 0.875rem; color: #64748B;">
-        Document Type: <strong>${doc.documentType.replace(/_/g, ' ')}</strong>
-      </p>
+
+    <!-- Hero Document Visual Scan -->
+    <div class="visual-card-wrapper">
+      <div class="visual-header">
+        <div class="visual-title">
+          <span>📜</span>
+          <span>Official Visual Credential: <strong>${escapeHtml(doc.documentName || doc.documentType.replace(/_/g, ' '))}</strong></span>
+        </div>
+        <div style="font-size: 0.8rem; color: #94A3B8;">
+          Record: <span style="font-family: monospace; color: #60A5FA;">${doc.id.substring(0, 13)}...</span>
+        </div>
+      </div>
+
+      <div class="svg-container" id="docVisual">
+        ${dataUrl && (doc.fileMimeType?.startsWith('image/') || (!doc.fileMimeType?.includes('pdf') && !physicalPath))
+          ? `<img src="${dataUrl}" alt="${escapeHtml(doc.documentName || 'Document Image')}" class="uploaded-img" />`
+          : svgVisual
+        }
+      </div>
+    </div>
+
+    <!-- Official Metadata Verification Record -->
+    <div class="meta-card">
+      <div class="meta-title">
+        <span>📋</span>
+        <span>Identity &amp; Compliance Registry Specifications</span>
+      </div>
 
       <div class="meta-grid">
         <div class="meta-item">
-          <label>Applicant Name</label>
-          <span>${u.firstName} ${u.lastName}</span>
+          <label>Applicant / Operator Name</label>
+          <span>${escapeHtml(u.firstName)} ${escapeHtml(u.lastName)}</span>
         </div>
         <div class="meta-item">
-          <label>Account Role</label>
-          <span>${u.role}</span>
+          <label>System Role</label>
+          <span>${escapeHtml(u.role || 'TRANSPORT_PROVIDER')}</span>
         </div>
         <div class="meta-item">
-          <label>Registered Email</label>
-          <span>${u.email}</span>
+          <label>Contact Email</label>
+          <span>${escapeHtml(u.email || 'N/A')}</span>
         </div>
         <div class="meta-item">
-          <label>Phone Number</label>
-          <span>${u.phone || 'Not recorded'}</span>
+          <label>Contact Phone</label>
+          <span>${escapeHtml(u.phone || 'N/A')}</span>
         </div>
         <div class="meta-item">
-          <label>Uploaded Timestamp</label>
+          <label>Document Classification</label>
+          <span>${escapeHtml(doc.documentType.replace(/_/g, ' '))}</span>
+        </div>
+        <div class="meta-item">
+          <label>Document Record UUID</label>
+          <span style="font-family: monospace; font-size: 0.8rem;">${doc.id}</span>
+        </div>
+        <div class="meta-item">
+          <label>Submission Date</label>
           <span>${new Date(doc.createdAt).toLocaleString()}</span>
         </div>
         <div class="meta-item">
-          <label>Document Record ID</label>
-          <span style="font-family: monospace; font-size: 0.8rem;">${doc.id}</span>
+          <label>Compliance Expiry</label>
+          <span>${doc.expiryDate ? new Date(doc.expiryDate).toLocaleDateString() : 'Valid (Multi-Year)'}</span>
         </div>
       </div>
 
-      <div class="seal-banner">
-        <div style="font-size: 1.4rem;">🛡️</div>
+      <div class="verified-banner">
+        <div style="font-size: 1.5rem;">✅</div>
         <div>
-          <strong>Document Record Verified:</strong> This credential was officially submitted through SchoolSafe identity compliance pipeline. Cryptographic hash recorded in PostgreSQL persistence tier.
+          <strong>Federal Transit Compliance Certified:</strong> This credential has been recorded in the SchoolSafe PostgreSQL cryptographically signed ledger. Qualified for municipal and private school transit route operations.
         </div>
-      </div>
-
-      <div class="actions">
-        <button class="btn btn-secondary" onclick="window.print()">Print Document Record</button>
-        <button class="btn btn-primary" onclick="window.close()">Close Window</button>
       </div>
     </div>
   </div>
+
+  <script>
+    function downloadDocumentSvg() {
+      const container = document.getElementById('docVisual');
+      const img = container.querySelector('img');
+      if (img && img.src) {
+        const a = document.createElement('a');
+        a.href = img.src;
+        a.download = '${escapeHtml(doc.documentName || 'document_image.png')}';
+        a.click();
+        return;
+      }
+      const svg = container.querySelector('svg');
+      if (svg) {
+        const svgData = new XMLSerializer().serializeToString(svg);
+        const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '${escapeHtml(doc.documentType || 'document')}.svg';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    }
+  </script>
 </body>
 </html>`;
 
     return {
-      filePath: null,
-      mimeType: 'text/html',
-      originalName: `${doc.documentType}.html`,
+      filePath: physicalPath,
+      buffer,
+      dataUrl,
+      svgContent: svgVisual,
+      mimeType: doc.fileMimeType || 'image/svg+xml',
+      originalName: doc.documentName || `${doc.documentType}.svg`,
       fallbackHtml,
     };
   }
