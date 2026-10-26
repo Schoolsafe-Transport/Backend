@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { prisma } from '../config/prisma';
-import { verifyAccessToken, sanitizeUser } from '../utils/security.util';
+import { verifyAccessToken, verifyRefreshToken, sanitizeUser } from '../utils/security.util';
 import { AuthenticatedRequest, UserRole } from '../types/auth.types';
 import { AppError } from './errorHandler';
 
@@ -32,10 +32,15 @@ export const authenticate = async (
     try {
       payload = verifyAccessToken(token);
     } catch (_err) {
-      const error: AppError = new Error('Access denied: Invalid or expired token');
-      error.statusCode = 401;
-      error.code = 'UNAUTHENTICATED';
-      return next(error);
+      try {
+        // Fallback: If access token is expired or query parameter passed refresh token
+        payload = verifyRefreshToken(token);
+      } catch (_err2) {
+        const error: AppError = new Error('Access denied: Invalid or expired token');
+        error.statusCode = 401;
+        error.code = 'UNAUTHENTICATED';
+        return next(error);
+      }
     }
 
     // Verify user still exists in database and is active
