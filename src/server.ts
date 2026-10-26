@@ -45,13 +45,22 @@ const ensureInitialAdminAndStatuses = async () => {
 
     // Seed default platform administrator
     console.log('🌱 Seeding initial platform administrator...');
-    const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
-    await prisma.user.create({
-      data: {
-        email: 'admin@schoolsafe.org',
+    const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
+    await prisma.user.upsert({
+      where: { email: 'rachelberhane716@gmail.com' },
+      update: {
         passwordHash: adminPasswordHash,
-        firstName: 'SchoolSafe',
-        lastName: 'Administrator',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+      create: {
+        email: 'rachelberhane716@gmail.com',
+        passwordHash: adminPasswordHash,
+        firstName: 'Rachel',
+        lastName: 'Berhane',
         role: 'ADMIN',
         status: 'ACTIVE',
         isEmailVerified: true,
@@ -59,7 +68,7 @@ const ensureInitialAdminAndStatuses = async () => {
         isVerified: true,
       },
     });
-    console.log('✅ Default administrator ready: admin@schoolsafe.org (password: AdminSafe123!)');
+    console.log('✅ Administrator ready: rachelberhane716@gmail.com (password: naba1219@Ra)');
   } catch (err: any) {
     console.error('⚠️ Could not complete test database reset and admin setup:', err.message);
   }

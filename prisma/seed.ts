@@ -8,11 +8,11 @@ async function main() {
 
   const providerPasswordHash = await bcrypt.hash('SafeDriverPassword123!', 12);
   const parentPasswordHash = await bcrypt.hash('SafePassword123!', 12);
-  const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+  const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
 
   // 0. System Administrator
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@schoolsafe.org' },
+    where: { email: 'rachelberhane716@gmail.com' },
     update: {
       passwordHash: adminPasswordHash,
       role: UserRole.ADMIN,
@@ -22,10 +22,10 @@ async function main() {
       isVerified: true,
     },
     create: {
-      email: 'admin@schoolsafe.org',
+      email: 'rachelberhane716@gmail.com',
       passwordHash: adminPasswordHash,
-      firstName: 'SchoolSafe',
-      lastName: 'Administrator',
+      firstName: 'Rachel',
+      lastName: 'Berhane',
       role: UserRole.ADMIN,
       status: UserStatus.ACTIVE,
       isEmailVerified: true,

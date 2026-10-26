@@ -460,25 +460,26 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
 
     await prisma.user.deleteMany({
       where: {
-        email: { not: 'admin@schoolsafe.org' },
+        email: { not: 'rachelberhane716@gmail.com' },
       },
     });
 
-    const adminPasswordHash = await bcrypt.hash('AdminSafe123!', 12);
+    const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
     const admin = await prisma.user.upsert({
-      where: { email: 'admin@schoolsafe.org' },
+      where: { email: 'rachelberhane716@gmail.com' },
       update: {
         passwordHash: adminPasswordHash,
+        role: 'ADMIN',
         status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
         isVerified: true,
       },
       create: {
-        email: 'admin@schoolsafe.org',
+        email: 'rachelberhane716@gmail.com',
         passwordHash: adminPasswordHash,
-        firstName: 'SchoolSafe',
-        lastName: 'Administrator',
+        firstName: 'Rachel',
+        lastName: 'Berhane',
         role: 'ADMIN',
         status: 'ACTIVE',
         isEmailVerified: true,
