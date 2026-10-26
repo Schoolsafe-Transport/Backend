@@ -23,16 +23,23 @@ const storage = multer.diskStorage({
   },
 });
 
-// File filter: explicitly allow only JPEG, PNG, and PDF
+// File filter: explicitly allow only PNG, PDF, and JPEG (with mobile compatibility)
 const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/x-png', 'image/pjpeg', 'application/pdf', 'application/x-pdf'];
   const allowedExtensions = ['.jpg', '.jpeg', '.png', '.pdf'];
   const ext = path.extname(file.originalname).toLowerCase();
 
-  if (allowedMimeTypes.includes(file.mimetype) && allowedExtensions.includes(ext)) {
+  // Allow if either extension or declared MIME matches allowed list (for mobile browser compatibility)
+  if (allowedExtensions.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
+    // Normalize MIME type if needed
+    if (ext === '.pdf' && file.mimetype !== 'application/pdf') {
+      file.mimetype = 'application/pdf';
+    } else if (ext === '.png' && file.mimetype !== 'image/png') {
+      file.mimetype = 'image/png';
+    }
     cb(null, true);
   } else {
-    const err: AppError = new Error('Invalid file format. Only JPEG, PNG, and PDF files are allowed for account documents.');
+    const err: AppError = new Error('Invalid file format. Documents must be submitted strictly as PNG or PDF (max 10MB).');
     err.statusCode = 400;
     cb(err as any, false);
   }

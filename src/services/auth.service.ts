@@ -832,6 +832,18 @@ export class AuthService {
       }
     }
 
+    const isPdf =
+      Boolean(doc.fileMimeType === 'application/pdf') ||
+      Boolean(doc.documentName?.toLowerCase().endsWith('.pdf')) ||
+      Boolean(dataUrl?.startsWith('data:application/pdf'));
+
+    const isImage =
+      Boolean(doc.fileMimeType?.startsWith('image/')) ||
+      Boolean(dataUrl?.startsWith('data:image/')) ||
+      Boolean(doc.documentName?.toLowerCase().endsWith('.png')) ||
+      Boolean(doc.documentName?.toLowerCase().endsWith('.jpg')) ||
+      Boolean(doc.documentName?.toLowerCase().endsWith('.jpeg'));
+
     const u = doc.user || {
       firstName: 'Applicant',
       lastName: 'User',
@@ -1087,33 +1099,56 @@ export class AuthService {
       </div>
       <div class="actions-bar">
         <span class="status-badge">${doc.status}</span>
-        <a href="?format=image" target="_blank" class="btn btn-secondary" title="View standalone pure image">
-          🖼️ Pure Image
-        </a>
-        <button onclick="downloadDocumentSvg()" class="btn btn-primary" title="Download official document vector image">
-          ⬇️ Download Image
-        </button>
+        ${isPdf ? `
+          <a href="?format=raw" target="_blank" class="btn btn-primary" title="Open PDF in new window">
+            📄 Open Fullscreen PDF
+          </a>
+          <a href="?format=raw&download=1" download="${escapeHtml(doc.documentName || 'document.pdf')}" class="btn btn-secondary" title="Download PDF document">
+            ⬇️ Download PDF
+          </a>
+        ` : `
+          <a href="?format=image" target="_blank" class="btn btn-secondary" title="View standalone pure image">
+            🖼️ Pure Image
+          </a>
+          <button onclick="downloadDocumentSvg()" class="btn btn-primary" title="Download document image">
+            ⬇️ Download Image
+          </button>
+        `}
         <button onclick="window.print()" class="btn btn-secondary">
           🖨️ Print
         </button>
       </div>
     </div>
 
-    <!-- Hero Document Visual Scan -->
+    <!-- Hero Document Visual Scan / PDF Viewer -->
     <div class="visual-card-wrapper">
       <div class="visual-header">
         <div class="visual-title">
-          <span>📜</span>
+          <span>${isPdf ? '📄' : '📜'}</span>
           <span>Official Visual Credential: <strong>${escapeHtml(doc.documentName || doc.documentType.replace(/_/g, ' '))}</strong></span>
         </div>
         <div style="font-size: 0.8rem; color: #94A3B8;">
-          Record: <span style="font-family: monospace; color: #60A5FA;">${doc.id.substring(0, 13)}...</span>
+          Format: <span style="font-weight: 700; color: #38BDF8;">${isPdf ? 'PDF DOCUMENT' : 'PNG / IMAGE'}</span> • Record: <span style="font-family: monospace; color: #60A5FA;">${doc.id.substring(0, 13)}...</span>
         </div>
       </div>
 
       <div class="svg-container" id="docVisual">
-        ${dataUrl && (doc.fileMimeType?.startsWith('image/') || (!doc.fileMimeType?.includes('pdf') && !physicalPath))
-          ? `<img src="${dataUrl}" alt="${escapeHtml(doc.documentName || 'Document Image')}" class="uploaded-img" />`
+        ${isPdf
+          ? `<div style="width: 100%; min-height: 600px; background: #FFFFFF; border-radius: 12px; overflow: hidden;">
+               <object data="${dataUrl || '?format=raw'}" type="application/pdf" style="width: 100%; height: 600px; border: none;">
+                 <iframe src="${dataUrl || '?format=raw'}" style="width: 100%; height: 600px; border: none;">
+                   <div style="padding: 2.5rem; text-align: center; color: #1E293B;">
+                     <h3 style="margin-bottom: 0.5rem; color: #0F172A;">PDF Document Verified</h3>
+                     <p style="margin-bottom: 1.5rem; color: #64748B;">Uploaded document: ${escapeHtml(doc.documentName || 'document.pdf')}</p>
+                     <a href="?format=raw" target="_blank" class="btn btn-primary">📄 Open Fullscreen PDF</a>
+                   </div>
+                 </iframe>
+               </object>
+             </div>`
+          : (isImage && dataUrl)
+          ? `<div style="display: flex; justify-content: center; width: 100%;">
+               <img src="${dataUrl}" alt="${escapeHtml(doc.documentName || 'Submitted Document Image')}" class="uploaded-img" />
+             </div>`
           : svgVisual
         }
       </div>
@@ -1201,9 +1236,11 @@ export class AuthService {
       filePath: physicalPath,
       buffer,
       dataUrl,
+      isPdf,
+      isImage,
       svgContent: svgVisual,
-      mimeType: doc.fileMimeType || 'image/svg+xml',
-      originalName: doc.documentName || `${doc.documentType}.svg`,
+      mimeType: isPdf ? 'application/pdf' : (doc.fileMimeType || 'image/svg+xml'),
+      originalName: doc.documentName || (isPdf ? `${doc.documentType}.pdf` : `${doc.documentType}.svg`),
       fallbackHtml,
     };
   }

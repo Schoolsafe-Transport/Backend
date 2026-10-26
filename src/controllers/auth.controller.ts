@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 import { AuthenticatedRequest } from '../types/auth.types';
@@ -219,20 +220,41 @@ export class AuthController {
     try {
       const { id } = req.params;
       const format = req.query.format as string;
-      const { filePath, buffer, svgContent, mimeType, originalName, fallbackHtml } =
+      const download = req.query.download === '1' || req.query.download === 'true';
+      const disposition = download ? 'attachment' : 'inline';
+      const { filePath, buffer, isPdf, isImage, svgContent, mimeType, originalName, fallbackHtml } =
         await authService.getDocumentFile(id, req.user!.id, req.user!.role);
+
+      // If client requests raw PDF or binary format (e.g. for PDF viewers or download)
+      if (format === 'raw' || format === 'pdf') {
+        res.setHeader('Content-Type', isPdf ? 'application/pdf' : mimeType);
+        res.setHeader('Content-Disposition', `${disposition}; filename="${originalName}"`);
+        if (buffer) {
+          res.send(buffer);
+          return;
+        }
+        if (filePath && fs.existsSync(filePath)) {
+          res.sendFile(filePath);
+          return;
+        }
+        if (svgContent) {
+          res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+          res.send(svgContent);
+          return;
+        }
+      }
 
       // If client requests pure image format (e.g. for standalone image viewing or embedding)
       if (format === 'image' || format === 'svg') {
         if (buffer && mimeType?.startsWith('image/')) {
           res.setHeader('Content-Type', mimeType);
-          res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+          res.setHeader('Content-Disposition', `${disposition}; filename="${originalName}"`);
           res.send(buffer);
           return;
         }
 
         res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-        res.setHeader('Content-Disposition', `inline; filename="${originalName.replace(/\.[^.]+$/, '')}.svg"`);
+        res.setHeader('Content-Disposition', `${disposition}; filename="${originalName.replace(/\.[^.]+$/, '')}.svg"`);
         res.send(svgContent);
         return;
       }
@@ -240,7 +262,7 @@ export class AuthController {
       // If physical file exists and request is not a browser page visit
       if (filePath && req.query.view !== 'html' && !req.headers.accept?.includes('text/html')) {
         res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+        res.setHeader('Content-Disposition', `${disposition}; filename="${originalName}"`);
         res.sendFile(filePath);
         return;
       }
@@ -252,7 +274,7 @@ export class AuthController {
       }
 
       res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+      res.setHeader('Content-Disposition', `${disposition}; filename="${originalName}"`);
       if (filePath) {
         res.sendFile(filePath);
       } else if (buffer) {
