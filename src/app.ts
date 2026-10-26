@@ -12,6 +12,10 @@ import apiRoutes from './routes';
 const app: Application = express();
 app.use(helmet({
   contentSecurityPolicy: false,
+  frameguard: false,
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
 }));
 app.use(
   cors({

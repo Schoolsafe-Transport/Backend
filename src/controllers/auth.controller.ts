@@ -225,6 +225,11 @@ export class AuthController {
       const { filePath, buffer, isPdf, isImage, svgContent, mimeType, originalName, fallbackHtml } =
         await authService.getDocumentFile(id, req.user!.id, req.user!.role);
 
+      // Ensure cross-origin iframe embedding works in admin portals
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', "frame-ancestors *");
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
       // If client requests raw PDF or binary format (e.g. for PDF viewers or download)
       if (format === 'raw' || format === 'pdf') {
         res.setHeader('Content-Type', isPdf ? 'application/pdf' : mimeType);
