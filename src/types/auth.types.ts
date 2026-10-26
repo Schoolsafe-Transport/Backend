@@ -40,6 +40,7 @@ export interface UserSanitized {
   serviceArea?: string | null;
   registrationStep?: number;
   accountDocuments?: any[];
+  latestVerificationCode?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +54,8 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: UserSanitized;
   tokens: AuthTokens;
+  sixDigitCode?: string;
+  verificationToken?: string;
 }
 
 export interface AuthenticatedRequest extends Request {

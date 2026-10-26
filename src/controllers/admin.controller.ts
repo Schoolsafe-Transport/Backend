@@ -372,6 +372,20 @@ export class AdminController {
       next(error);
     }
   }
+
+  async verifyUserEmail(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const updated = await adminService.verifyUserEmail(userId);
+      res.status(200).json({
+        success: true,
+        message: 'User email marked as verified',
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();

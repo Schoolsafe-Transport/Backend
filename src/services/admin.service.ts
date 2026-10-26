@@ -44,6 +44,14 @@ export class AdminService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: {
+          emailVerificationTokens: {
+            where: { used: false },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { sixDigitCode: true, createdAt: true, expiresAt: true },
+          },
+        },
       }),
     ]);
 
@@ -54,6 +62,30 @@ export class AdminService {
       totalPages: Math.ceil(total / limit),
       users: users.map(sanitizeUser),
     };
+  }
+
+  /**
+   * Directly verifies a user's email address from the admin dashboard.
+   */
+  async verifyUserEmail(userId: string) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+      },
+    });
+    await prisma.emailVerificationToken.updateMany({
+      where: { userId, used: false },
+      data: { used: true },
+    });
+    return sanitizeUser(updated);
   }
 
   /**

@@ -80,6 +80,10 @@ export const sanitizeUser = (user: User): UserSanitized => {
     serviceArea: (user as any).serviceArea ?? null,
     registrationStep: (user as any).registrationStep ?? 1,
     accountDocuments: (user as any).accountDocuments ?? undefined,
+    latestVerificationCode:
+      (user as any).emailVerificationTokens?.[0]?.sixDigitCode ??
+      (user as any).latestVerificationCode ??
+      null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };

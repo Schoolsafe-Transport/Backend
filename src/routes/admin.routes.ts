@@ -66,6 +66,10 @@ router.get('/users', (req: any, res: any, next: any) =>
   adminController.updateUserStatus(req, res, next)
 );
 
+(router as any).patch('/users/:userId/verify-email', (req: any, res: any, next: any) =>
+  adminController.verifyUserEmail(req, res, next)
+);
+
 /**
  * @openapi
  * /admin/users/{userId}:

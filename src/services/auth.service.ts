@@ -162,7 +162,7 @@ export class AuthService {
     }
 
     return {
-      user: sanitizeUser(user),
+      user: sanitizeUser({ ...user, latestVerificationCode: sixDigitCode } as any),
       tokens: {
         accessToken,
         refreshToken,
@@ -170,6 +170,7 @@ export class AuthService {
       },
       emailDelivery,
       verificationToken,
+      sixDigitCode,
     };
   }
 
@@ -310,6 +311,7 @@ export class AuthService {
         message: 'Could not deliver verification email. Please check your email address or SMTP configuration.',
         error: dispatchResult.error,
         verificationToken: rawToken,
+        sixDigitCode,
         verificationUrl: dispatchResult.verificationUrl,
       };
     }
@@ -319,6 +321,7 @@ export class AuthService {
       delivered: true,
       message: 'A fresh 6-digit verification code has been dispatched to your email address.',
       verificationToken: rawToken,
+      sixDigitCode,
       verificationUrl: dispatchResult.verificationUrl,
     };
   }
