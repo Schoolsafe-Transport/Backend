@@ -118,8 +118,68 @@ export class AdminService {
 
     const updated = await prisma.user.update({
       where: { id: userId },
-      data: { status: status as any },
+      data: {
+        status: status as any,
+        isVerified: status === 'ACTIVE' ? true : user.isVerified,
+      },
     });
+
+    // 1. In-App Notification Feed
+    let notifTitle = 'Account Status Updated';
+    let notifMessage = `Your SchoolSafe account status is now ${status}.`;
+    let notifType = 'ACCOUNT_STATUS';
+
+    if (status === 'ACTIVE') {
+      notifTitle = '🎉 Account Approved & Activated!';
+      notifMessage = 'Your SchoolSafe account has been approved by the administrator. You now have full access to all platform features.';
+      notifType = 'ACCOUNT_APPROVED';
+    } else if (status === 'SUSPENDED') {
+      notifTitle = '⚠️ Account Suspended';
+      notifMessage = 'Your SchoolSafe account has been suspended by an administrator. Please contact support for assistance.';
+      notifType = 'ACCOUNT_SUSPENDED';
+    } else if (status === 'REJECTED') {
+      notifTitle = 'Application Decision';
+      notifMessage = 'Your account application has been reviewed and rejected by an administrator.';
+      notifType = 'ACCOUNT_REJECTED';
+    }
+
+    try {
+      await prisma.notification.create({
+        data: {
+          userId,
+          title: notifTitle,
+          message: notifMessage,
+          type: notifType,
+          entityId: userId,
+          isRead: false,
+        },
+      });
+    } catch (notifErr: any) {
+      console.warn('[AdminService] Could not create in-app notification:', notifErr.message);
+    }
+
+    // 2. Dispatch real decision email to user's inbox
+    try {
+      await emailService.sendApprovalDecisionEmail(
+        updated.email,
+        updated.firstName,
+        status === 'ACTIVE' ? 'APPROVED' : status === 'REJECTED' ? 'REJECTED' : 'SUSPENDED'
+      );
+    } catch (emailErr: any) {
+      console.warn('[AdminService] Could not send decision email:', emailErr.message);
+    }
+
+    // 3. Record Audit Log
+    if (requesterId) {
+      await this.recordAuditLog(
+        requesterId,
+        status === 'ACTIVE' ? 'APPROVE_USER' : status === 'SUSPENDED' ? 'SUSPEND_USER' : 'REJECT_USER',
+        'USER',
+        userId,
+        `Account status changed to ${status}`,
+        userId
+      );
+    }
 
     return sanitizeUser(updated);
   }
@@ -265,6 +325,40 @@ export class AdminService {
         isVerified: decision === 'APPROVE' ? true : user.isVerified,
       },
     });
+
+    // In-App Notification Feed
+    let appNotifTitle = 'Application Status Updated';
+    let appNotifMessage = `Your SchoolSafe application status is now ${nextStatus}.`;
+    let appNotifType = 'APPLICATION_STATUS';
+
+    if (decision === 'APPROVE') {
+      appNotifTitle = '🎉 Application Approved!';
+      appNotifMessage = 'Congratulations! Your SchoolSafe application has been approved by the administrator. You now have full access to your provider dashboard.';
+      appNotifType = 'APPLICATION_APPROVED';
+    } else if (decision === 'REJECT') {
+      appNotifTitle = 'Application Decision';
+      appNotifMessage = `Your SchoolSafe application was not approved.${reason ? ` Reason: ${reason}` : ''}`;
+      appNotifType = 'APPLICATION_REJECTED';
+    } else if (decision === 'SUSPEND') {
+      appNotifTitle = '⚠️ Account Suspended';
+      appNotifMessage = `Your account has been suspended.${reason ? ` Reason: ${reason}` : ''}`;
+      appNotifType = 'APPLICATION_SUSPENDED';
+    }
+
+    try {
+      await prisma.notification.create({
+        data: {
+          userId,
+          title: appNotifTitle,
+          message: appNotifMessage,
+          type: appNotifType,
+          entityId: userId,
+          isRead: false,
+        },
+      });
+    } catch (notifErr: any) {
+      console.warn('[AdminService] Could not create in-app notification:', notifErr.message);
+    }
 
     // Send decision notice via email
     try {

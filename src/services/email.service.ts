@@ -314,25 +314,86 @@ export class EmailService {
 
     const isApproved = decision === 'APPROVED';
     const subject = isApproved
-      ? 'Your SchoolSafe provider application has been approved'
-      : `Your SchoolSafe provider application was ${decision.toLowerCase()}`;
+      ? '🎉 Your SchoolSafe account has been approved!'
+      : `SchoolSafe Account Notice: Application ${decision.toLowerCase()}`;
 
+    const textContent = `Hello ${recipientName},\n\nYour SchoolSafe account status has been updated to: ${decision}.${
+      reason ? `\n\nNotes from administrator: ${reason}` : ''
+    }\n\nLog in: ${env.CLIENT_URL || 'https://schoolsafe-eight.vercel.app'}\n\nSchoolSafe Administration`;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1e3a8a; margin: 0; font-size: 24px;">SchoolSafe</h2>
+          <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Smart School Transportation Safeguarding</p>
+        </div>
+        <h3 style="color: ${isApproved ? '#166534' : '#991b1b'}; font-size: 20px; margin-top: 0;">${subject}</h3>
+        <p style="font-size: 15px; color: #334155;">Hello <strong>${recipientName || 'Member'}</strong>,</p>
+        <p style="font-size: 14px; color: #334155; line-height: 1.6;">
+          Your SchoolSafe account application has been reviewed by an administrator. Your account status is now: <strong style="color: ${isApproved ? '#166534' : '#991b1b'};">${decision}</strong>.
+        </p>
+        ${
+          reason
+            ? `<div style="background-color: #f8fafc; padding: 14px; border-left: 4px solid #94a3b8; border-radius: 4px; margin: 16px 0; font-size: 14px; color: #475569;"><strong>Administrator notes:</strong><br />${reason}</div>`
+            : ''
+        }
+        ${
+          isApproved
+            ? `
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="${env.CLIENT_URL || 'https://schoolsafe-eight.vercel.app'}" style="background-color: #16a34a; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 15px; display: inline-block;">
+            Go to Your Dashboard
+          </a>
+        </div>
+        `
+            : ''
+        }
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+        <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
+          SchoolSafe Transportation Platform • Safe journeys for every student.
+        </p>
+      </div>
+    `;
+
+    // 1. Dispatch via Vercel HTTPS Relay (Port 443 — Bypasses cloud SMTP port blocks on Render)
+    try {
+      const relayBase = (env.CLIENT_URL && env.CLIENT_URL.startsWith('https://'))
+        ? env.CLIENT_URL
+        : 'https://schoolsafe-eight.vercel.app';
+      const relayUrl = `${relayBase.replace(/\/+$/, '')}/api/send-email`;
+      console.log(`[EmailService] Attempting decision email dispatch via Vercel HTTPS Relay to ${toEmail}...`);
+      const relayRes = await fetch(relayUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: toEmail,
+          subject,
+          text: textContent,
+          html: htmlContent,
+          recipientName,
+        }),
+      });
+
+      if (relayRes.ok) {
+        const relayData: any = await relayRes.json();
+        if (relayData?.delivered || relayData?.success) {
+          console.log(`[EmailService] Decision email delivered via Vercel Relay! Message ID: ${relayData.messageId}`);
+          return { delivered: true, messageId: relayData.messageId };
+        }
+      }
+    } catch (relayErr: any) {
+      console.warn('[EmailService] Vercel Relay decision email attempt failed:', relayErr.message);
+    }
+
+    // 2. Fallback: Direct SMTP (Port 465)
     try {
       if (this.transporter) {
         const info = await this.transporter.sendMail({
           from: `"SchoolSafe Administrator" <${env.EMAIL_FROM}>`,
           to: toEmail,
           subject,
-          text: `Hello ${recipientName},\n\nYour application status has been updated to: ${decision}.${reason ? `\n\nNotes from administrator: ${reason}` : ''}\n\nSchoolSafe Administration`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
-              <h3 style="color: ${isApproved ? '#166534' : '#991b1b'};">${subject}</h3>
-              <p>Hello <strong>${recipientName}</strong>,</p>
-              <p>Your application status is now: <strong>${decision}</strong>.</p>
-              ${reason ? `<div style="background-color: #f8fafc; padding: 12px; border-left: 4px solid #94a3b8; margin: 16px 0;"><strong>Administrator notes:</strong><br />${reason}</div>` : ''}
-              <p>Thank you,<br />SchoolSafe Administration</p>
-            </div>
-          `,
+          text: textContent,
+          html: htmlContent,
         });
 
         return {
@@ -340,9 +401,9 @@ export class EmailService {
           messageId: info.messageId,
         };
       }
-
       return { delivered: true };
     } catch (err: any) {
+      console.warn('[EmailService] Direct SMTP fallback failed:', err.message);
       return {
         delivered: false,
         error: err.message,

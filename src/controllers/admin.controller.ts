@@ -358,11 +358,20 @@ export class AdminController {
 
       await prisma.notification.deleteMany({ where: { userId } });
       await prisma.emailVerificationToken.deleteMany({ where: { userId } });
+      await prisma.passwordResetToken.deleteMany({ where: { userId } });
+      await prisma.refreshToken.deleteMany({ where: { userId } });
       await prisma.auditLog.deleteMany({ where: { OR: [{ adminId: userId }, { targetUserId: userId }] } });
+      await prisma.rating.deleteMany({ where: { OR: [{ parentId: userId }, { providerId: userId }] } });
+      await prisma.payment.deleteMany({ where: { OR: [{ payerId: userId }, { receiverId: userId }] } });
+      await prisma.transportationAgreement.deleteMany({ where: { OR: [{ parentId: userId }, { providerId: userId }] } });
+      await prisma.transportationOffer.deleteMany({ where: { providerId: userId } });
+      await prisma.transportationRequest.deleteMany({ where: { OR: [{ parentId: userId }, { providerId: userId }] } });
       await prisma.accountDocument.deleteMany({ where: { userId } });
       await prisma.student.deleteMany({ where: { parentId: userId } });
-      await prisma.vehicle.deleteMany({ where: { providerId: userId } });
+      await prisma.safetyIncident.deleteMany({ where: { reportedById: userId } });
+      await prisma.advertisingCampaign.deleteMany({ where: { businessId: userId } });
       await prisma.route.deleteMany({ where: { providerId: userId } });
+      await prisma.vehicle.deleteMany({ where: { providerId: userId } });
       await prisma.user.delete({ where: { id: userId } });
 
       res.status(200).json({
