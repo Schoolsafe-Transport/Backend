@@ -61,16 +61,23 @@ export class EmailService {
   }
 
   /**
-   * Returns true if valid SMTP credentials are configured in environment.
+   * Returns true if valid SMTP or HTTPS email API credentials are configured in environment.
    */
   public isConfigured(): boolean {
-    return Boolean(this.transporter && env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
+    return Boolean(
+      env.RESEND_API_KEY ||
+      env.BREVO_API_KEY ||
+      (this.transporter && env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)
+    );
   }
 
   /**
    * Verifies live SMTP transporter connection.
    */
   public async verifyConnection(): Promise<{ ok: boolean; error?: string }> {
+    if (env.RESEND_API_KEY || env.BREVO_API_KEY) {
+      return { ok: true };
+    }
     if (!this.isConfigured() || !this.transporter) {
       return {
         ok: false,
@@ -86,8 +93,8 @@ export class EmailService {
   }
 
   /**
-   * Dispatches a single-use cryptographically secure email verification link.
-   * Never claims delivery occurred if SMTP configuration is absent or delivery fails.
+   * Dispatches a single-use cryptographically secure email verification link and 6-digit code.
+   * Supports HTTPS APIs (Resend, Brevo) for cloud platforms like Render and SMTP for local development.
    */
   public async sendVerificationEmail(
     toEmail: string,
@@ -98,7 +105,7 @@ export class EmailService {
     const verificationUrl = `${env.CLIENT_URL}/verify-email?token=${encodeURIComponent(rawToken)}`;
 
     if (!this.isConfigured()) {
-      const errMsg = 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) not configured. Outbound email delivery could not be performed.';
+      const errMsg = 'Email credentials (RESEND_API_KEY, BREVO_API_KEY, or SMTP_HOST/USER/PASS) not configured.';
       console.warn(`[EmailService] ${errMsg}`);
       return {
         delivered: false,
@@ -108,55 +115,138 @@ export class EmailService {
       };
     }
 
+    const textContent = `Welcome to SchoolSafe!\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\n${
+      sixDigitCode ? `Or enter this 6-digit verification code: ${sixDigitCode}\n\n` : ''
+    }This link and code expire in 30 minutes. If you did not create this account, you can ignore this email.`;
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1e3a8a; margin: 0; font-size: 24px;">SchoolSafe</h2>
+          <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Smart School Transportation Safeguarding</p>
+        </div>
+        <p style="font-size: 16px; font-weight: 600; color: #1e293b;">Welcome to SchoolSafe, ${recipientName || 'Member'}!</p>
+        <p style="font-size: 14px; color: #334155; line-height: 1.6;">
+          Please enter the 6-digit verification code below in your SchoolSafe app to verify your email address and activate your account.
+        </p>
+        ${
+          sixDigitCode
+            ? `
+        <div style="margin: 28px 0; padding: 20px; background-color: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 10px; text-align: center;">
+          <p style="margin: 0 0 10px 0; font-size: 13px; color: #1e40af; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
+            Your 6-Digit Email Verification Code
+          </p>
+          <div style="font-size: 36px; font-weight: 800; letter-spacing: 10px; color: #1d4ed8; font-family: monospace;">
+            ${sixDigitCode}
+          </div>
+        </div>
+        `
+            : ''
+        }
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="${verificationUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 15px; display: inline-block;">
+            Verify Email Address Directly
+          </a>
+        </div>
+        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
+          If the button does not work, copy and paste this link into your browser:<br />
+          <a href="${verificationUrl}" style="color: #2563eb; word-break: break-all;">${verificationUrl}</a>
+        </p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+        <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
+          This code expires in 30 minutes. If you did not create this account, you can safely ignore this email.
+        </p>
+      </div>
+    `;
+
+    // 1. Resend HTTPS REST API (Port 443 — Bypasses cloud SMTP blocks)
+    if (env.RESEND_API_KEY) {
+      try {
+        console.log(`[EmailService] Dispatching via Resend HTTPS API to ${toEmail}...`);
+        const fromAddress = env.EMAIL_FROM && !env.EMAIL_FROM.includes('gmail.com')
+          ? `"SchoolSafe Smart Transit" <${env.EMAIL_FROM}>`
+          : 'SchoolSafe <onboarding@resend.dev>';
+
+        const response = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${env.RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: fromAddress,
+            to: [toEmail],
+            subject: 'Verify your SchoolSafe email address',
+            text: textContent,
+            html: htmlContent,
+          }),
+        });
+
+        const data: any = await response.json();
+        if (response.ok && data?.id) {
+          console.log(`[EmailService] Resend email delivered! Message ID: ${data.id}`);
+          return { delivered: true, messageId: data.id, verificationUrl };
+        } else {
+          console.error('[EmailService] Resend API error response:', data);
+          return { delivered: false, error: data?.message || 'Resend API dispatch failed', verificationUrl };
+        }
+      } catch (resendErr: any) {
+        console.error('[EmailService] Resend network error:', resendErr.message);
+        return { delivered: false, error: resendErr.message, verificationUrl };
+      }
+    }
+
+    // 2. Brevo HTTPS REST API (Port 443 — Bypasses cloud SMTP blocks)
+    if (env.BREVO_API_KEY) {
+      try {
+        console.log(`[EmailService] Dispatching via Brevo HTTPS API to ${toEmail}...`);
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'api-key': env.BREVO_API_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sender: { name: 'SchoolSafe Smart Transit', email: env.EMAIL_FROM || 'rahelnaba716@gmail.com' },
+            to: [{ email: toEmail, name: recipientName || 'Member' }],
+            subject: 'Verify your SchoolSafe email address',
+            htmlContent,
+            textContent,
+          }),
+        });
+
+        const data: any = await response.json();
+        if (response.ok && data?.messageId) {
+          console.log(`[EmailService] Brevo email delivered! Message ID: ${data.messageId}`);
+          return { delivered: true, messageId: data.messageId, verificationUrl };
+        } else {
+          console.error('[EmailService] Brevo API error response:', data);
+          return { delivered: false, error: data?.message || 'Brevo API dispatch failed', verificationUrl };
+        }
+      } catch (brevoErr: any) {
+        console.error('[EmailService] Brevo network error:', brevoErr.message);
+        return { delivered: false, error: brevoErr.message, verificationUrl };
+      }
+    }
+
+    // 3. Fallback: Direct SMTP (Port 465/587)
+    if (!this.transporter) {
+      const errMsg = 'No SMTP transporter initialized and no HTTPS email API keys provided.';
+      console.warn(`[EmailService] ${errMsg}`);
+      return { delivered: false, error: errMsg, verificationUrl };
+    }
+
     try {
-      const info = await this.transporter!.sendMail({
+      console.log(`[EmailService] Dispatching via SMTP transporter to ${toEmail}...`);
+      const info = await this.transporter.sendMail({
         from: `"SchoolSafe Smart Transit" <${env.EMAIL_FROM}>`,
         to: toEmail,
         subject: 'Verify your SchoolSafe email address',
-        text: `Welcome to SchoolSafe!\n\nPlease verify your email address by clicking the link below:\n\n${verificationUrl}\n\n${
-          sixDigitCode ? `Or enter this 6-digit verification code: ${sixDigitCode}\n\n` : ''
-        }This link and code expire in 30 minutes. If you did not create this account, you can ignore this email.`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h2 style="color: #1e3a8a; margin: 0; font-size: 24px;">SchoolSafe</h2>
-              <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Smart School Transportation Safeguarding</p>
-            </div>
-            <p style="font-size: 16px; font-weight: 600; color: #1e293b;">Welcome to SchoolSafe, ${recipientName || 'Member'}!</p>
-            <p style="font-size: 14px; color: #334155; line-height: 1.6;">
-              Please click the button below to verify your email address and activate your account.
-            </p>
-            <div style="text-align: center; margin: 28px 0;">
-              <a href="${verificationUrl}" style="background-color: #2563eb; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 12px rgba(37,99,235,0.25);">
-                Verify Email Address
-              </a>
-            </div>
-            ${
-              sixDigitCode
-                ? `
-            <div style="margin: 24px 0; padding: 16px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; text-align: center;">
-              <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
-                Or enter this 6-digit verification code in SchoolSafe
-              </p>
-              <div style="font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #1e3a8a; font-family: monospace;">
-                ${sixDigitCode}
-              </div>
-            </div>
-            `
-                : ''
-            }
-            <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
-              If the button does not work, copy and paste this link into your browser:<br />
-              <a href="${verificationUrl}" style="color: #2563eb; word-break: break-all;">${verificationUrl}</a>
-            </p>
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
-            <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
-              This link and code expire in 30 minutes. If you did not create this account, you can ignore this email.
-            </p>
-          </div>
-        `,
+        text: textContent,
+        html: htmlContent,
       });
 
+      console.log(`[EmailService] SMTP email delivered! Message ID: ${info.messageId}`);
       return {
         delivered: true,
         messageId: info.messageId,

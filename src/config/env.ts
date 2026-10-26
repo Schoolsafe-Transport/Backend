@@ -23,13 +23,15 @@ const envSchema = z.object({
   FAYDA_TOKEN_URL: z.string().default('https://esignet.ida.fayda.et/v1/esignet/oauth/v2/token'),
   FAYDA_USERINFO_URL: z.string().default('https://esignet.ida.fayda.et/v1/esignet/oidc/userinfo'),
 
-  // Email (SMTP for account verification and notification emails)
+  // Email (SMTP or HTTPS REST API for cloud deployments)
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.string().default('465'),
   SMTP_USER: z.string().default('rahelnaba716@gmail.com'),
   SMTP_PASS: z.string().default('odoyizjclhpejyxa'),
   SMTP_PASSWORD: z.string().default('odoyizjclhpejyxa'),
   EMAIL_FROM: z.string().default('rahelnaba716@gmail.com'),
+  RESEND_API_KEY: z.string().optional(),
+  BREVO_API_KEY: z.string().optional(),
   FRONTEND_URL: z.string().optional(),
 
   // Private File Storage (Receipts & Evidence)
