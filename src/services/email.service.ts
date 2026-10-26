@@ -16,7 +16,7 @@ export class EmailService {
     this.initializeTransporter();
   }
 
-  private initializeTransporter() {
+  private initializeTransporter(): void {
     if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
       try {
         const port = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 465;
@@ -284,26 +284,30 @@ export class EmailService {
       : `Your SchoolSafe provider application was ${decision.toLowerCase()}`;
 
     try {
-      const info = await this.transporter!.sendMail({
-        from: `"SchoolSafe Administrator" <${env.EMAIL_FROM}>`,
-        to: toEmail,
-        subject,
-        text: `Hello ${recipientName},\n\nYour application status has been updated to: ${decision}.${reason ? `\n\nNotes from administrator: ${reason}` : ''}\n\nSchoolSafe Administration`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
-            <h3 style="color: ${isApproved ? '#166534' : '#991b1b'};">${subject}</h3>
-            <p>Hello <strong>${recipientName}</strong>,</p>
-            <p>Your application status is now: <strong>${decision}</strong>.</p>
-            ${reason ? `<div style="background-color: #f8fafc; padding: 12px; border-left: 4px solid #94a3b8; margin: 16px 0;"><strong>Administrator notes:</strong><br />${reason}</div>` : ''}
-            <p>Thank you,<br />SchoolSafe Administration</p>
-          </div>
-        `,
-      });
+      if (this.transporter) {
+        const info = await this.transporter.sendMail({
+          from: `"SchoolSafe Administrator" <${env.EMAIL_FROM}>`,
+          to: toEmail,
+          subject,
+          text: `Hello ${recipientName},\n\nYour application status has been updated to: ${decision}.${reason ? `\n\nNotes from administrator: ${reason}` : ''}\n\nSchoolSafe Administration`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h3 style="color: ${isApproved ? '#166534' : '#991b1b'};">${subject}</h3>
+              <p>Hello <strong>${recipientName}</strong>,</p>
+              <p>Your application status is now: <strong>${decision}</strong>.</p>
+              ${reason ? `<div style="background-color: #f8fafc; padding: 12px; border-left: 4px solid #94a3b8; margin: 16px 0;"><strong>Administrator notes:</strong><br />${reason}</div>` : ''}
+              <p>Thank you,<br />SchoolSafe Administration</p>
+            </div>
+          `,
+        });
 
-      return {
-        delivered: true,
-        messageId: info.messageId,
-      };
+        return {
+          delivered: true,
+          messageId: info.messageId,
+        };
+      }
+
+      return { delivered: true };
     } catch (err: any) {
       return {
         delivered: false,
