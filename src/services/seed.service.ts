@@ -37,7 +37,7 @@ export async function purgeMockExampleData(dbClient?: any) {
 
     await db.notification.deleteMany({ where: { userId: { in: mockUserIds } } });
     await db.auditLog.deleteMany({
-      where: { OR: [{ initiatedById: { in: mockUserIds } }, { targetUserId: { in: mockUserIds } }] },
+      where: { OR: [{ adminId: { in: mockUserIds } }, { targetUserId: { in: mockUserIds } }] },
     });
     await db.accountDocument.deleteMany({ where: { userId: { in: mockUserIds } } });
     await db.rating.deleteMany({

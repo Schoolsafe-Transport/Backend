@@ -357,7 +357,8 @@ export class AdminController {
       }
 
       await prisma.notification.deleteMany({ where: { userId } });
-      await prisma.auditLog.deleteMany({ where: { OR: [{ initiatedById: userId }, { targetUserId: userId }] } });
+      await prisma.emailVerificationToken.deleteMany({ where: { userId } });
+      await prisma.auditLog.deleteMany({ where: { OR: [{ adminId: userId }, { targetUserId: userId }] } });
       await prisma.accountDocument.deleteMany({ where: { userId } });
       await prisma.student.deleteMany({ where: { parentId: userId } });
       await prisma.vehicle.deleteMany({ where: { providerId: userId } });
