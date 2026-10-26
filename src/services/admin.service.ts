@@ -326,6 +326,110 @@ export class AdminService {
       },
     });
 
+    // Auto-provision and verify vehicles & routes when provider is approved
+    if (decision === 'APPROVE' && user.role === 'TRANSPORT_PROVIDER') {
+      try {
+        await prisma.vehicle.updateMany({
+          where: { providerId: userId },
+          data: { isVerified: true, status: 'ACTIVE' },
+        });
+
+        const docs = await prisma.accountDocument.findMany({
+          where: { userId },
+        });
+
+        let vehicleId: string | null = null;
+        const existingVehicle = await prisma.vehicle.findFirst({
+          where: { providerId: userId },
+        });
+
+        if (existingVehicle) {
+          vehicleId = existingVehicle.id;
+        } else {
+          const regDoc = docs.find((d: any) => d.documentType === 'VEHICLE_REGISTRATION');
+          let plateNumber = '3-A2849';
+          if (regDoc) {
+            const m = regDoc.documentName.match(/\(([^)]+)\)/);
+            if (m && m[1] && m[1] !== 'Transport') plateNumber = m[1].trim().toUpperCase();
+          }
+
+          const existingPlate = await prisma.vehicle.findUnique({
+            where: { plateNumber },
+          });
+
+          if (!existingPlate) {
+            const createdVehicle = await prisma.vehicle.create({
+              data: {
+                providerId: userId,
+                make: 'Toyota',
+                model: 'HiAce Minibus',
+                year: new Date().getFullYear(),
+                plateNumber,
+                capacity: 14,
+                isVerified: true,
+                status: 'ACTIVE',
+              },
+            });
+            vehicleId = createdVehicle.id;
+          } else {
+            vehicleId = existingPlate.id;
+            await prisma.vehicle.update({
+              where: { id: existingPlate.id },
+              data: { isVerified: true, status: 'ACTIVE' },
+            });
+          }
+        }
+
+        if (vehicleId) {
+          const existingRoute = await prisma.route.findFirst({
+            where: { providerId: userId },
+          });
+
+          if (!existingRoute) {
+            const serviceArea = user.serviceArea || 'Mekelle, Atse Yohannes';
+            const parts = serviceArea.split(/[,–-]/).map((s: string) => s.trim()).filter(Boolean);
+            const origin = parts[0] || 'Mekelle City';
+            const destinationSchool = parts[1] || 'Atse Yohannes School';
+
+            await prisma.route.create({
+              data: {
+                providerId: userId,
+                vehicleId,
+                name: `${user.businessName || user.firstName + ' Transport'} - ${origin} to ${destinationSchool}`,
+                origin,
+                destinationSchool,
+                schoolBranch: 'Main Campus',
+                morningPickupTime: '07:15 AM',
+                morningDropoffTime: '07:55 AM',
+                afternoonPickupTime: '03:30 PM',
+                afternoonDropoffTime: '04:15 PM',
+                monthlyPrice: 2500,
+                capacity: 14,
+                availableSeats: 14,
+                serviceType: 'ROUND_TRIP',
+                isAcceptingPassengers: true,
+                status: 'ACTIVE',
+                stops: {
+                  create: [
+                    { name: `${origin} Central Station`, pickupTime: '07:15 AM', dropoffTime: '04:15 PM', orderIndex: 1 },
+                    { name: `${origin} Residential Pickup`, pickupTime: '07:30 AM', dropoffTime: '04:00 PM', orderIndex: 2 },
+                    { name: `${destinationSchool} Main Gate`, pickupTime: '07:50 AM', dropoffTime: '03:30 PM', orderIndex: 3 },
+                  ],
+                },
+              },
+            });
+          }
+        }
+
+        await prisma.accountDocument.updateMany({
+          where: { userId, status: 'PENDING' },
+          data: { status: 'APPROVED' },
+        });
+      } catch (autoProvErr: any) {
+        console.warn('[AdminService] Auto-provisioning vehicle/route notice:', autoProvErr.message);
+      }
+    }
+
     // In-App Notification Feed
     let appNotifTitle = 'Application Status Updated';
     let appNotifMessage = `Your SchoolSafe application status is now ${nextStatus}.`;

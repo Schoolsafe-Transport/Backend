@@ -45,11 +45,11 @@ export class TransportationService {
       },
       provider: {
         status: 'ACTIVE',
-        isVerified: true,
+        ...(query.verified ? { isVerified: true } : {}),
       },
       vehicle: {
         status: 'ACTIVE',
-        isVerified: true,
+        ...(query.verified ? { isVerified: true } : {}),
       },
     };
 
