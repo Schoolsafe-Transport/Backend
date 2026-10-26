@@ -5,10 +5,18 @@ export const createCampaignSchema = z.object({
   description: z.string().optional(),
   bannerUrl: z
     .string()
-    .url('Banner must be a valid image URL')
+    .min(1, 'Media creative URL (image or video) is required')
     .refine(
-      (url: string) => { try { const p = new URL(url); return p.protocol === 'http:' || p.protocol === 'https:'; } catch { return false; } },
-      'Banner URL must use the http or https protocol'
+      (url: string) => {
+        if (url.startsWith('data:image/') || url.startsWith('data:video/')) return true;
+        try {
+          const p = new URL(url);
+          return p.protocol === 'http:' || p.protocol === 'https:';
+        } catch {
+          return false;
+        }
+      },
+      'Creative media must be a valid http/https URL (image/video) or Data URI'
     ),
   targetUrl: z
     .string()
