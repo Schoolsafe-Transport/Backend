@@ -340,6 +340,38 @@ export class AdminController {
       next(error);
     }
   }
+
+  async deleteUser(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const { prisma } = await import('../config/prisma');
+
+      const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+      if (!targetUser) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      if (targetUser.email === 'rachelberhane716@gmail.com' || targetUser.role === 'ADMIN') {
+        res.status(403).json({ success: false, message: 'Administrator accounts cannot be deleted' });
+        return;
+      }
+
+      await prisma.notification.deleteMany({ where: { userId } });
+      await prisma.auditLog.deleteMany({ where: { OR: [{ initiatedById: userId }, { targetUserId: userId }] } });
+      await prisma.accountDocument.deleteMany({ where: { userId } });
+      await prisma.student.deleteMany({ where: { parentId: userId } });
+      await prisma.vehicle.deleteMany({ where: { providerId: userId } });
+      await prisma.route.deleteMany({ where: { providerId: userId } });
+      await prisma.user.delete({ where: { id: userId } });
+
+      res.status(200).json({
+        success: true,
+        message: `User ${targetUser.email} has been permanently deleted.`,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 export const adminController = new AdminController();

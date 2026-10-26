@@ -68,6 +68,18 @@ router.get('/users', (req: any, res: any, next: any) =>
 
 /**
  * @openapi
+ * /admin/users/{userId}:
+ *   delete:
+ *     summary: "Permanently delete a user account"
+ *     tags:
+ *       - Administration
+ */
+router.delete('/users/:userId', (req: any, res: any, next: any) =>
+  adminController.deleteUser(req, res, next)
+);
+
+/**
+ * @openapi
  * /admin/stats:
  *   get:
  *     summary: "Retrieve aggregate platform metrics and financial indicators"
