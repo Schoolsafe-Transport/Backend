@@ -1,10 +1,11 @@
 import { PrismaClient } from '@prisma/client';
-import { seedBaselineOperationalData } from '../src/services/seed.service';
+import { ensureRealAdministrator, purgeMockExampleData } from '../src/services/seed.service';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  await seedBaselineOperationalData(prisma);
+  await purgeMockExampleData(prisma);
+  await ensureRealAdministrator(prisma);
 }
 
 main()

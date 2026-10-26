@@ -326,14 +326,15 @@ export class AdminController {
     }
   }
 
-  async seedBaseline(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+  async purgeMockData(_req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { seedBaselineOperationalData } = await import('../services/seed.service');
+      const { purgeMockExampleData, ensureRealAdministrator } = await import('../services/seed.service');
       const { prisma } = await import('../config/prisma');
-      await seedBaselineOperationalData(prisma);
+      await purgeMockExampleData(prisma);
+      await ensureRealAdministrator(prisma);
       res.status(200).json({
         success: true,
-        message: 'Operational baseline data populated successfully',
+        message: 'Mock example data purged successfully. Only real records remain.',
       });
     } catch (error) {
       next(error);

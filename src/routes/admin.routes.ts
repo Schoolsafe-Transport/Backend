@@ -224,14 +224,14 @@ router.get('/campaigns', (req: any, res: any, next: any) =>
 
 /**
  * @openapi
- * /admin/seed-baseline:
+ * /admin/purge-mock-data:
  *   post:
- *     summary: "Populate baseline operational data (Admin only)"
+ *     summary: "Purge all mock example data (*@schoolsafe.org) (Admin only)"
  *     tags:
  *       - Administration
  */
-router.post('/seed-baseline', (req: any, res: any, next: any) =>
-  adminController.seedBaseline(req, res, next)
+router.post('/purge-mock-data', (req: any, res: any, next: any) =>
+  adminController.purgeMockData(req, res, next)
 );
 
 export default router;

@@ -26,54 +26,20 @@ const runDatabaseMigrations = () => {
 
 runDatabaseMigrations();
 
-// Seed default administrator if none exists & ensure unapproved accounts are PENDING
+// Ensure only real data exists and administrator account is active
 const ensureInitialAdminAndStatuses = async () => {
   if (process.env.NODE_ENV === 'test') return;
   try {
     const { prisma } = await import('./config/prisma');
-    const { seedBaselineOperationalData } = await import('./services/seed.service');
+    const { purgeMockExampleData, ensureRealAdministrator } = await import('./services/seed.service');
 
-    // Check if the platform has operational baseline data
-    const providerCount = await prisma.user.count({
-      where: { role: 'TRANSPORT_PROVIDER' },
-    });
+    // Purge mock example accounts (@schoolsafe.org) so only real users exist
+    await purgeMockExampleData(prisma);
 
-    if (providerCount === 0) {
-      console.log('🌱 No operational providers detected. Running initial baseline data seed...');
-      await seedBaselineOperationalData(prisma);
-    } else {
-      // Ensure the administrator account credentials are always fresh & active
-      const bcrypt = await import('bcryptjs');
-      const adminPasswordHash = await bcrypt.hash('naba1219@Ra', 12);
-      await prisma.user.upsert({
-        where: { email: 'rachelberhane716@gmail.com' },
-        update: {
-          passwordHash: adminPasswordHash,
-          role: 'ADMIN',
-          status: 'ACTIVE',
-          isEmailVerified: true,
-          emailVerifiedAt: new Date(),
-          isVerified: true,
-          firstName: 'Rachel',
-          lastName: 'Berhane',
-        },
-        create: {
-          email: 'rachelberhane716@gmail.com',
-          passwordHash: adminPasswordHash,
-          firstName: 'Rachel',
-          lastName: 'Berhane',
-          phone: '+251942027483',
-          role: 'ADMIN',
-          status: 'ACTIVE',
-          isEmailVerified: true,
-          emailVerifiedAt: new Date(),
-          isVerified: true,
-        },
-      });
-      console.log('✅ Administrator ready: rachelberhane716@gmail.com (password: naba1219@Ra)');
-    }
+    // Confirm real platform administrator
+    await ensureRealAdministrator(prisma);
   } catch (err: any) {
-    console.error('⚠️ Could not complete admin setup and baseline seed:', err.message);
+    console.error('⚠️ Could not complete real admin setup:', err.message);
   }
 };
 
