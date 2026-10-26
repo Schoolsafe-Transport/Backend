@@ -229,7 +229,38 @@ export class EmailService {
       }
     }
 
-    // 3. Fallback: Direct SMTP (Port 465/587)
+    // 3. Vercel HTTPS Relay (Port 443 — Bypasses cloud SMTP port blocks on Render)
+    try {
+      const relayUrl = `${env.CLIENT_URL || 'https://schoolsafe-eight.vercel.app'}/api/send-email`;
+      console.log(`[EmailService] Attempting dispatch via Vercel HTTPS Relay to ${toEmail}...`);
+      const relayRes = await fetch(relayUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: toEmail,
+          subject: 'Verify your SchoolSafe email address',
+          text: textContent,
+          html: htmlContent,
+          sixDigitCode,
+          recipientName,
+          verificationUrl,
+        }),
+      });
+
+      if (relayRes.ok) {
+        const relayData: any = await relayRes.json();
+        if (relayData?.delivered || relayData?.success) {
+          console.log(`[EmailService] Vercel HTTPS Relay email delivered! Message ID: ${relayData.messageId}`);
+          return { delivered: true, messageId: relayData.messageId, verificationUrl };
+        } else {
+          console.warn('[EmailService] Vercel HTTPS Relay error response:', relayData?.error);
+        }
+      }
+    } catch (relayErr: any) {
+      console.warn('[EmailService] Vercel HTTPS Relay attempt failed:', relayErr.message);
+    }
+
+    // 4. Fallback: Direct SMTP (Port 465/587)
     if (!this.transporter) {
       const errMsg = 'No SMTP transporter initialized and no HTTPS email API keys provided.';
       console.warn(`[EmailService] ${errMsg}`);
