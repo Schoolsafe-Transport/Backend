@@ -450,6 +450,9 @@ router.get('/documents', authenticate as any, (req: any, res: any, next: any) =>
 /**
  * Securely retrieve an uploaded document
  */
+router.get('/documents/:id', authenticate as any, (req: any, res: any, next: any) =>
+  authController.getDocument(req, res, next)
+);
 /**
  * Utility endpoint: purge test user data and restore default admin
  */

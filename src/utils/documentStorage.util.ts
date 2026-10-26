@@ -48,6 +48,16 @@ export const uploadDocumentMiddleware = multer({
   },
 });
 
+export function findDocumentFile(filename: string): string | null {
+  try {
+    const safeFilename = path.basename(filename);
+    const fullPath = path.join(documentsDir, safeFilename);
+    return fs.existsSync(fullPath) ? fullPath : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 export function getDocumentFilePath(filename: string): string {
   // Prevent directory traversal attacks
   const safeFilename = path.basename(filename);

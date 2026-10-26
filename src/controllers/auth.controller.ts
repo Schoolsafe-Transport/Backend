@@ -218,15 +218,21 @@ export class AuthController {
   async getDocument(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      const { filePath, mimeType, originalName } = await authService.getDocumentFile(
+      const { filePath, mimeType, originalName, fallbackHtml } = await authService.getDocumentFile(
         id,
         req.user!.id,
         req.user!.role
       );
 
+      if (fallbackHtml) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.status(200).send(fallbackHtml);
+        return;
+      }
+
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
-      res.sendFile(filePath);
+      res.sendFile(filePath!);
     } catch (error) {
       next(error);
     }

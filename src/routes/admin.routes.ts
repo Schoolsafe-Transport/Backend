@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { adminController } from '../controllers/admin.controller';
+import { authController } from '../controllers/auth.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate';
 import { applicationDecisionSchema } from '../schemas/admin.schema';
@@ -164,6 +165,18 @@ router.get('/audit-logs', (req: any, res: any, next: any) =>
  */
 (router as any).patch('/documents/:id/review', (req: any, res: any, next: any) =>
   adminController.reviewAccountDocument(req, res, next)
+);
+
+/**
+ * @openapi
+ * /admin/documents/{id}:
+ *   get:
+ *     summary: "Retrieve document file or compliance preview"
+ *     tags:
+ *       - Administration
+ */
+router.get('/documents/:id', (req: any, res: any, next: any) =>
+  authController.getDocument(req, res, next)
 );
 
 /**
