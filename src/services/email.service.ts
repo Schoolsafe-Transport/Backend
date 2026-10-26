@@ -176,7 +176,7 @@ export class EmailService {
           body: JSON.stringify({
             from: fromAddress,
             to: [toEmail],
-            subject: 'Verify your SchoolSafe email address',
+            subject: sixDigitCode ? `Your SchoolSafe verification code is ${sixDigitCode}` : 'Verify your SchoolSafe email address',
             text: textContent,
             html: htmlContent,
           }),
@@ -209,7 +209,7 @@ export class EmailService {
           body: JSON.stringify({
             sender: { name: 'SchoolSafe Smart Transit', email: env.EMAIL_FROM || 'rahelnaba716@gmail.com' },
             to: [{ email: toEmail, name: recipientName || 'Member' }],
-            subject: 'Verify your SchoolSafe email address',
+            subject: sixDigitCode ? `Your SchoolSafe verification code is ${sixDigitCode}` : 'Verify your SchoolSafe email address',
             htmlContent,
             textContent,
           }),
@@ -241,7 +241,7 @@ export class EmailService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: toEmail,
-          subject: 'Verify your SchoolSafe email address',
+          subject: sixDigitCode ? `Your SchoolSafe verification code is ${sixDigitCode}` : 'Verify your SchoolSafe email address',
           text: textContent,
           html: htmlContent,
           sixDigitCode,
@@ -275,7 +275,7 @@ export class EmailService {
       const info = await this.transporter.sendMail({
         from: `"SchoolSafe Smart Transit" <${env.EMAIL_FROM}>`,
         to: toEmail,
-        subject: 'Verify your SchoolSafe email address',
+        subject: sixDigitCode ? `Your SchoolSafe verification code is ${sixDigitCode}` : 'Verify your SchoolSafe email address',
         text: textContent,
         html: htmlContent,
       });

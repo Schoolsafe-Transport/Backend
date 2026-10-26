@@ -41,9 +41,11 @@ export class AuthService {
     });
 
     if (recentToken) {
-      const error: AppError = new Error('Verification email was sent recently. Please wait 60 seconds before requesting another.');
-      error.statusCode = 429;
-      throw error;
+      // Re-use existing valid 6-digit code so user receives it in their inbox immediately without being blocked
+      return {
+        rawToken: recentToken.tokenHash,
+        sixDigitCode: recentToken.sixDigitCode,
+      };
     }
 
     // Invalidate any previously unconsumed tokens for this user
