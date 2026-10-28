@@ -386,8 +386,19 @@ export class AdminService {
           });
 
           if (!existingRoute) {
-            const serviceArea = user.serviceArea || 'Mekelle, Atse Yohannes';
-            const parts = serviceArea.split(/[,–-]/).map((s: string) => s.trim()).filter(Boolean);
+            const rawArea = user.serviceArea || 'Mekelle to Atse Yohannes';
+            let parsedPrice = 2500;
+            let routeAreaStr = rawArea;
+
+            // Extract price if specified (e.g. "Mekelle Central to Atse Yohannes | ETB 3000")
+            if (rawArea.includes('|')) {
+              const [areaPart, pricePart] = rawArea.split('|').map((s: string) => s.trim());
+              routeAreaStr = areaPart || rawArea;
+              const numeric = Number(pricePart.replace(/[^0-9]/g, ''));
+              if (numeric > 0) parsedPrice = numeric;
+            }
+
+            const parts = routeAreaStr.split(/[,–-]|(?:\sto\s)/i).map((s: string) => s.trim()).filter(Boolean);
             const origin = parts[0] || 'Mekelle City';
             const destinationSchool = parts[1] || 'Atse Yohannes School';
 
@@ -401,7 +412,7 @@ export class AdminService {
                 schoolBranch: 'Main Campus',
                 departureTimeMorning: '07:15 AM',
                 departureTimeAfternoon: '03:30 PM',
-                monthlyPrice: 2500,
+                monthlyPrice: parsedPrice,
                 capacity: 14,
                 availableSeats: 14,
                 serviceType: 'BOTH',
