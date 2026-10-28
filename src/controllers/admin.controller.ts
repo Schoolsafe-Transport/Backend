@@ -45,6 +45,39 @@ export class AdminController {
     }
   }
 
+  async updateUserRole(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { userId } = req.params;
+      const { role } = req.body;
+      const validRoles = [
+        'PARENT',
+        'STUDENT',
+        'SCHOOL_ADMIN',
+        'TRANSPORT_PROVIDER',
+        'DRIVER',
+        'BUSINESS',
+        'ADMIN',
+        'SUPER_ADMIN',
+      ];
+      if (!validRoles.includes(role)) {
+        res.status(400).json({
+          success: false,
+          message: `Invalid role '${role}'. Must be one of: ${validRoles.join(', ')}`,
+        });
+        return;
+      }
+
+      const updated = await adminService.updateUserRole(userId, role, req.user?.role, req.user?.id);
+      res.status(200).json({
+        success: true,
+        message: `User role changed to ${role} successfully`,
+        data: updated,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async listApplications(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
     try {
       const { role, status, search } = req.query as any;
@@ -351,7 +384,12 @@ export class AdminController {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
-      if (targetUser.email === 'rachelberhane716@gmail.com' || targetUser.role === 'ADMIN') {
+      if (
+        targetUser.email === 'rachelberhane716@gmail.com' ||
+        targetUser.email === 'rahelnaba716@gmail.com' ||
+        targetUser.role === 'ADMIN' ||
+        targetUser.role === 'SUPER_ADMIN'
+      ) {
         res.status(403).json({ success: false, message: 'Administrator accounts cannot be deleted' });
         return;
       }

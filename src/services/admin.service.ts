@@ -184,6 +184,48 @@ export class AdminService {
     return sanitizeUser(updated);
   }
 
+  async updateUserRole(
+    userId: string,
+    role: string,
+    requesterRole?: string,
+    requesterId?: string
+  ) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      const error: AppError = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (user.role === 'SUPER_ADMIN' && requesterRole !== 'SUPER_ADMIN') {
+      const error: AppError = new Error('Only a SUPER_ADMIN can modify a SUPER_ADMIN account');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        role: role as any,
+        isVerified: role === 'ADMIN' ? true : user.isVerified,
+        isEmailVerified: role === 'ADMIN' ? true : user.isEmailVerified,
+      },
+    });
+
+    if (requesterId) {
+      await this.recordAuditLog(
+        requesterId,
+        'UPDATE_USER_ROLE',
+        'USER',
+        userId,
+        `Role changed from ${user.role} to ${role}`,
+        userId
+      );
+    }
+
+    return sanitizeUser(updated);
+  }
+
   /**
    * Retrieves provider, driver, and business registration applications with document and verification status.
    */

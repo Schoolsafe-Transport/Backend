@@ -91,6 +91,39 @@ export async function ensureRealAdministrator(dbClient?: any) {
     },
   });
 
-  console.log('✅ Real administrator confirmed:', admin.email);
+  // Also ensure rahelnaba716@gmail.com is an ACTIVE ADMIN
+  const existingRahel = await db.user.findUnique({
+    where: { email: 'rahelnaba716@gmail.com' },
+  });
+
+  if (existingRahel) {
+    await db.user.update({
+      where: { id: existingRahel.id },
+      data: {
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+    });
+  } else {
+    await db.user.create({
+      data: {
+        email: 'rahelnaba716@gmail.com',
+        passwordHash: adminPasswordHash,
+        firstName: 'Rahel',
+        lastName: 'Bekele',
+        phone: '+251942027483',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+    });
+  }
+
+  console.log('✅ Real administrators confirmed: rachelberhane716@gmail.com, rahelnaba716@gmail.com');
   return admin;
 }

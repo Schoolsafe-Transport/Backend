@@ -463,7 +463,7 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
 
     await prisma.user.deleteMany({
       where: {
-        email: { not: 'rachelberhane716@gmail.com' },
+        email: { notIn: ['rachelberhane716@gmail.com', 'rahelnaba716@gmail.com'] },
       },
     });
 
@@ -491,10 +491,67 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
       },
     });
 
+    await prisma.user.upsert({
+      where: { email: 'rahelnaba716@gmail.com' },
+      update: {
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+      create: {
+        email: 'rahelnaba716@gmail.com',
+        passwordHash: adminPasswordHash,
+        firstName: 'Rahel',
+        lastName: 'Bekele',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isVerified: true,
+      },
+    });
+
     res.status(200).json({
       success: true,
-      message: 'All test accounts deleted successfully. Database reset for fresh testing.',
+      message: 'All test accounts deleted successfully. Real administrator accounts preserved and confirmed.',
       admin: { email: admin.email, role: admin.role },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * Utility endpoint: sync and guarantee system administrator roles
+ */
+router.post('/sync-admin-role', async (_req: any, res: any) => {
+  try {
+    const { prisma } = await import('../config/prisma');
+    const updated = await prisma.user.updateMany({
+      where: {
+        email: { in: ['rahelnaba716@gmail.com', 'rachelberhane716@gmail.com'] },
+      },
+      data: {
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        isVerified: true,
+        isEmailVerified: true,
+      },
+    });
+
+    const admins = await prisma.user.findMany({
+      where: {
+        email: { in: ['rahelnaba716@gmail.com', 'rachelberhane716@gmail.com'] },
+      },
+      select: { id: true, email: true, role: true, status: true },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Confirmed ${updated.count} administrator account(s)`,
+      admins,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
