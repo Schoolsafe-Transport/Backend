@@ -55,10 +55,10 @@ export const authenticate = async (
       return next(error);
     }
 
-    // Auto-promote system administrators to ADMIN role if not already assigned
+    // Auto-promote system administrator rachelberhane716@gmail.com to ADMIN role
     const emailLower = user.email.toLowerCase();
     if (
-      (emailLower === 'rahelnaba716@gmail.com' || emailLower === 'rachelberhane716@gmail.com') &&
+      emailLower === 'rachelberhane716@gmail.com' &&
       user.role !== 'ADMIN' &&
       user.role !== 'SUPER_ADMIN'
     ) {
@@ -66,6 +66,22 @@ export const authenticate = async (
         where: { id: user.id },
         data: {
           role: 'ADMIN',
+          status: 'ACTIVE',
+          isVerified: true,
+          isEmailVerified: true,
+        },
+      });
+    }
+
+    // Auto-revert rahelnaba716@gmail.com to PARENT role
+    if (
+      emailLower === 'rahelnaba716@gmail.com' &&
+      (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: 'PARENT',
           status: 'ACTIVE',
           isVerified: true,
           isEmailVerified: true,

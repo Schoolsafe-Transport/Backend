@@ -91,7 +91,7 @@ export async function ensureRealAdministrator(dbClient?: any) {
     },
   });
 
-  // Also ensure rahelnaba716@gmail.com is an ACTIVE ADMIN
+  // Ensure rahelnaba716@gmail.com is an ACTIVE PARENT user
   const existingRahel = await db.user.findUnique({
     where: { email: 'rahelnaba716@gmail.com' },
   });
@@ -100,7 +100,7 @@ export async function ensureRealAdministrator(dbClient?: any) {
     await db.user.update({
       where: { id: existingRahel.id },
       data: {
-        role: 'ADMIN',
+        role: 'PARENT',
         status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
@@ -115,7 +115,7 @@ export async function ensureRealAdministrator(dbClient?: any) {
         firstName: 'Rahel',
         lastName: 'Bekele',
         phone: '+251942027483',
-        role: 'ADMIN',
+        role: 'PARENT',
         status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
@@ -124,6 +124,6 @@ export async function ensureRealAdministrator(dbClient?: any) {
     });
   }
 
-  console.log('✅ Real administrators confirmed: rachelberhane716@gmail.com, rahelnaba716@gmail.com');
+  console.log('✅ Accounts confirmed: Administrator (rachelberhane716@gmail.com), Parent (rahelnaba716@gmail.com)');
   return admin;
 }

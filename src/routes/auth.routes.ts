@@ -494,7 +494,7 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
     await prisma.user.upsert({
       where: { email: 'rahelnaba716@gmail.com' },
       update: {
-        role: 'ADMIN',
+        role: 'PARENT',
         status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
@@ -505,7 +505,7 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
         passwordHash: adminPasswordHash,
         firstName: 'Rahel',
         lastName: 'Bekele',
-        role: 'ADMIN',
+        role: 'PARENT',
         status: 'ACTIVE',
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
@@ -515,7 +515,7 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
 
     res.status(200).json({
       success: true,
-      message: 'All test accounts deleted successfully. Real administrator accounts preserved and confirmed.',
+      message: 'All test accounts deleted successfully. Real accounts preserved and confirmed (rachelberhane: ADMIN, rahelnaba: PARENT).',
       admin: { email: admin.email, role: admin.role },
     });
   } catch (err: any) {
@@ -524,14 +524,15 @@ router.post('/reset-test-database', async (_req: any, res: any) => {
 });
 
 /**
- * Utility endpoint: sync and guarantee system administrator roles
+ * Utility endpoint: sync and guarantee system administrator and parent roles
  */
 router.post('/sync-admin-role', async (_req: any, res: any) => {
   try {
     const { prisma } = await import('../config/prisma');
-    const updated = await prisma.user.updateMany({
+    // Ensure rachelberhane716@gmail.com is ADMIN
+    await prisma.user.updateMany({
       where: {
-        email: { in: ['rahelnaba716@gmail.com', 'rachelberhane716@gmail.com'] },
+        email: 'rachelberhane716@gmail.com',
       },
       data: {
         role: 'ADMIN',
@@ -541,7 +542,20 @@ router.post('/sync-admin-role', async (_req: any, res: any) => {
       },
     });
 
-    const admins = await prisma.user.findMany({
+    // Ensure rahelnaba716@gmail.com is PARENT
+    await prisma.user.updateMany({
+      where: {
+        email: 'rahelnaba716@gmail.com',
+      },
+      data: {
+        role: 'PARENT',
+        status: 'ACTIVE',
+        isVerified: true,
+        isEmailVerified: true,
+      },
+    });
+
+    const accounts = await prisma.user.findMany({
       where: {
         email: { in: ['rahelnaba716@gmail.com', 'rachelberhane716@gmail.com'] },
       },
@@ -550,8 +564,8 @@ router.post('/sync-admin-role', async (_req: any, res: any) => {
 
     res.status(200).json({
       success: true,
-      message: `Confirmed ${updated.count} administrator account(s)`,
-      admins,
+      message: `Confirmed real accounts (rachelberhane: ADMIN, rahelnaba: PARENT)`,
+      accounts,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });

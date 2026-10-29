@@ -386,7 +386,6 @@ export class AdminController {
       }
       if (
         targetUser.email === 'rachelberhane716@gmail.com' ||
-        targetUser.email === 'rahelnaba716@gmail.com' ||
         targetUser.role === 'ADMIN' ||
         targetUser.role === 'SUPER_ADMIN'
       ) {

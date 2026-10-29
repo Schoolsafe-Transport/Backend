@@ -353,10 +353,10 @@ export class AuthService {
       throw error;
     }
 
-    // Auto-promote system administrators to ADMIN role if not already assigned
+    // Auto-promote system administrator rachelberhane716@gmail.com to ADMIN role
     const emailLower = user.email.toLowerCase();
     if (
-      (emailLower === 'rahelnaba716@gmail.com' || emailLower === 'rachelberhane716@gmail.com') &&
+      emailLower === 'rachelberhane716@gmail.com' &&
       user.role !== 'ADMIN' &&
       user.role !== 'SUPER_ADMIN'
     ) {
@@ -364,6 +364,22 @@ export class AuthService {
         where: { id: user.id },
         data: {
           role: 'ADMIN',
+          status: 'ACTIVE',
+          isVerified: true,
+          isEmailVerified: true,
+        },
+      });
+    }
+
+    // Explicitly guarantee rahelnaba716@gmail.com is a verified PARENT user
+    if (
+      emailLower === 'rahelnaba716@gmail.com' &&
+      (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: 'PARENT',
           status: 'ACTIVE',
           isVerified: true,
           isEmailVerified: true,
@@ -1284,7 +1300,7 @@ export class AuthService {
 
     const emailLower = user.email.toLowerCase();
     if (
-      (emailLower === 'rahelnaba716@gmail.com' || emailLower === 'rachelberhane716@gmail.com') &&
+      emailLower === 'rachelberhane716@gmail.com' &&
       user.role !== 'ADMIN' &&
       user.role !== 'SUPER_ADMIN'
     ) {
@@ -1292,6 +1308,24 @@ export class AuthService {
         where: { id: user.id },
         data: {
           role: 'ADMIN',
+          status: 'ACTIVE',
+          isVerified: true,
+          isEmailVerified: true,
+        },
+        include: {
+          accountDocuments: true,
+        },
+      });
+    }
+
+    if (
+      emailLower === 'rahelnaba716@gmail.com' &&
+      (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN')
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          role: 'PARENT',
           status: 'ACTIVE',
           isVerified: true,
           isEmailVerified: true,

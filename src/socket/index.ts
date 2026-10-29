@@ -218,7 +218,9 @@ export const emitToUser = (userId: string, event: string, payload: any): void =>
   if (ioInstance) {
     try {
       ioInstance.to(`user:${userId}`).emit(event, payload);
+      ioInstance.to(`user:${userId}`).emit('notification', { event, payload });
       ioInstance.emit(`notify:${userId}`, { event, payload });
+      ioInstance.emit('notification', { userId, event, payload });
     } catch (_err) {
       // Socket emission error handling
     }

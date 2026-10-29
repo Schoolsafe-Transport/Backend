@@ -294,16 +294,8 @@ export class TransportationService {
       throw err;
     }
 
-    if (!parent.isVerified) {
-      const err: any = new Error(
-        'Identity verification required: Parents must verify their Ethiopian Fayda National ID before requesting school transportation'
-      );
-      err.statusCode = 403;
-      err.code = 'FAYDA_VERIFICATION_REQUIRED';
-      throw err;
-    }
-
-    if (!parent.isEmailVerified) {
+    // 0. Verification check: Parent must have verified email or verified account
+    if (!parent.isEmailVerified && !parent.isVerified) {
       const err: any = new Error(
         'Email verification required: Please verify your email address before requesting school transportation'
       );
@@ -416,6 +408,12 @@ export class TransportationService {
       routeId: route.id,
       studentName: `${student.firstName} ${student.lastName}`,
       proposedPrice,
+    });
+    emitToUser(route.providerId, 'notification', {
+      title: 'New Seat Request Received',
+      message: `Parent submitted a seat request for ${student.firstName} on route ${route.name} at ETB ${proposedPrice}/month.`,
+      type: 'REQUEST_RECEIVED',
+      entityId: newRequest.id,
     });
 
     return this.getRequestById(newRequest.id, parentId, 'PARENT');
